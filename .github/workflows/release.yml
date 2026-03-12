@@ -1,0 +1,103 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build binaries
+        run: make build-all VERSION=${{ github.ref_name }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build test image (linux/amd64)
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            -f Dockerfile.ci \
+            -t istioctl-env-test:amd64 \
+            --load .
+
+      - name: Test linux/amd64 binary in Docker
+        run: |
+          docker run --rm --platform linux/amd64 -v $(pwd)/build/istioctl-env-linux-amd64:/src/istioctl-env istioctl-env-test:amd64
+
+      - name: Build test image (linux/arm64)
+        run: |
+          docker buildx build \
+            --platform linux/arm64 \
+            -f Dockerfile.ci \
+            -t istioctl-env-test:arm64 \
+            --load .
+
+      - name: Test linux/arm64 binary in Docker
+        run: |
+          docker run --rm --platform linux/arm64 -v $(pwd)/build/istioctl-env-linux-arm64:/src/istioctl-env istioctl-env-test:arm64
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          CURRENT_TAG="${{ github.ref_name }}"
+          PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed -n '2p')
+
+          if [ -n "$PREVIOUS_TAG" ]; then
+            NOTES=$(git log "${PREVIOUS_TAG}..${CURRENT_TAG}" --pretty=format:"- %s (%h)" --no-merges)
+          else
+            NOTES=$(git log "${CURRENT_TAG}" --pretty=format:"- %s (%h)" --no-merges)
+          fi
+
+          if [ -z "$NOTES" ]; then
+            NOTES="No changes recorded."
+          fi
+
+          {
+            echo "notes<<EOF"
+            echo "$NOTES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          body: ${{ steps.release_notes.outputs.notes }}
+          target_commitish: ${{ github.sha }}
+          draft: true
+          files: |
+            build/istioctl-env-darwin-arm64
+            build/istioctl-env-darwin-amd64
+            build/istioctl-env-linux-arm64
+            build/istioctl-env-linux-amd64
+
+      - name: Upload binaries as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: istioctl-env-binaries-${{ github.ref_name }}
+          path: |
+            build/istioctl-env-darwin-arm64
+            build/istioctl-env-darwin-amd64
+            build/istioctl-env-linux-arm64
+            build/istioctl-env-linux-amd64

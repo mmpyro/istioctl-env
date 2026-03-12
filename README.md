@@ -1,0 +1,218 @@
+# istioctl-env
+
+A version manager for [istioctl](https://istio.io/latest/docs/reference/commands/istioctl/) CLI, similar to [tfenv](https://github.com/tfutils/tfenv) and [pyenv](https://github.com/pyenv/pyenv).
+
+Manage multiple versions of the istioctl CLI and switch between them seamlessly.
+
+## Documentation
+
+- [Docs index](docs/index.md)
+- [Installation and configuration](docs/installation-and-configuration.md)
+- [CLI reference](docs/cli-reference.md)
+- [Caching strategy](docs/caching.md)
+
+## Downloads (latest release)
+
+Latest release: **v0.1.2** (tag: `v0.1.2`).
+
+| Platform | Asset | Download |
+|---|---|---|
+| macOS (Intel) | `istioctl-env-darwin-amd64` | [Download](https://github.com/mmpyro/istioctl-env/releases/download/v.0.1.2/istioctl-env-darwin-amd64) |
+| macOS (Apple Silicon) | `istioctl-env-darwin-arm64` | [Download](https://github.com/mmpyro/istioctl-env/releases/download/v.0.1.2/istioctl-env-darwin-arm64) |
+| Linux (x86_64) | `istioctl-env-linux-amd64` | [Download](https://github.com/mmpyro/istioctl-env/releases/download/v.0.1.2/istioctl-env-linux-amd64) |
+| Linux (ARM64) | `istioctl-env-linux-arm64` | [Download](https://github.com/mmpyro/istioctl-env/releases/download/v.0.1.2/istioctl-env-linux-arm64) |
+
+## Features
+
+- Install and manage multiple istioctl CLI versions
+- Automatic version switching based on project directory (`.istioctl-version`)
+- Shell-level, local (directory), and global version configuration
+- Version priority: shell > local > global
+- Auto-detection of OS and architecture for binary downloads
+- Shim-based transparent proxying of `istioctl` commands
+
+## Installation
+
+### From Source
+
+```sh
+git clone https://github.com/mmpyro/istioctl-env.git
+cd istioctl-env
+make build
+```
+
+The binary will be at `build/istioctl-env`. Move it to a directory in your `PATH`:
+
+```sh
+sudo mv build/istioctl-env /usr/local/bin/
+```
+
+### Cross-compile for All Platforms
+
+```sh
+make build-all
+```
+
+This produces binaries for:
+- `linux/amd64`
+- `linux/arm64`
+- `darwin/amd64`
+- `darwin/arm64`
+
+## Quick Start
+
+### 1. Set up ISTIOENV_ROOT
+
+Add to your `~/.bashrc` or `~/.zshrc`:
+
+```sh
+export ISTIOENV_ROOT="$HOME/.istioenv"
+```
+
+Reload your shell:
+
+```sh
+source ~/.bashrc  # or source ~/.zshrc
+```
+
+### 2. Initialize istioctl-env
+
+Add the following to your `~/.bashrc` or `~/.zshrc` (after the `ISTIOENV_ROOT` export):
+
+```sh
+eval "$(istioctl-env init)"
+```
+
+This sets up:
+- A `istioctl-env` shell function for `istioctl-env shell` support
+- PATH prepend for the istioctl shim
+
+### 3. Install an istioctl version
+
+```sh
+# Install a specific version
+istioctl-env install 1.24.0
+
+# Install the latest stable version
+istioctl-env install
+```
+
+### 4. Set a version
+
+```sh
+# Set global default
+istioctl-env global 1.24.0
+
+# Set for current directory (creates .istioctl-version)
+istioctl-env local 1.24.0
+
+# Set for current shell session
+istioctl-env shell 1.24.0
+```
+
+### 5. Use istioctl
+
+```sh
+istioctl version
+```
+
+The shim automatically resolves and uses the correct version.
+
+## Command Reference
+
+Full reference: [docs/cli-reference.md](docs/cli-reference.md)
+
+| Command | Description |
+|---------|-------------|
+| `istioctl-env help` | Display help and all available commands |
+| `istioctl-env list` | List all installed versions |
+| `istioctl-env list-remote` | List all available istioctl versions from GitHub |
+| `istioctl-env list-remote --prerelease` | Include pre-release istioctl versions |
+| `istioctl-env latest` | Print the latest available version of istioctl from GitHub |
+| `istioctl-env init` | Initialize istioctl-env setup |
+| `istioctl-env status` | Show current environment status |
+| `istioctl-env install [VERSION]` | Install a specific version (or latest) |
+| `istioctl-env uninstall VERSION` | Uninstall a specific version |
+| `istioctl-env exec VERSION CMD` | Run a command using a specific istioctl version |
+| `istioctl-env shell [VERSION]` | Set/show shell version (`ISTIOENV_VERSION`) |
+| `istioctl-env local [VERSION]` | Set/show local version (`.istioctl-version`) |
+| `istioctl-env global [VERSION]` | Set/show global version (`$ISTIOENV_ROOT/version`) |
+| `istioctl-env which` | Print path to active istioctl binary |
+| `istioctl-env version` | Print istioctl-env version |
+
+## Version Priority
+
+When `istioctl` is invoked, the version is resolved in this order:
+
+1. **Shell** — `ISTIOENV_VERSION` environment variable (set via `istioctl-env shell`)
+2. **Local** — `.istioctl-version` file in the current or parent directories (set via `istioctl-env local`)
+3. **Global** — `$ISTIOENV_ROOT/version` file (set via `istioctl-env global`)
+
+If no version is configured at any level, the command fails with an informative error.
+
+## Shell Setup
+
+### Bash
+
+Add the following to your `~/.bashrc`:
+
+```sh
+# istioctl-env setup
+export ISTIOENV_ROOT="$HOME/.istioenv"
+eval "$(istioctl-env init)"
+source <(istioctl-env autocompletion)
+```
+
+### Zsh
+
+Add the following to your `~/.zshrc`:
+
+```sh
+# istioctl-env setup
+export ISTIOENV_ROOT="$HOME/.istioenv"
+eval "$(istioctl-env init)"
+source <(istioctl-env autocompletion)
+```
+
+## Caching
+
+`istioctl-env` uses a three-layer caching strategy to keep `list-remote` and `latest` fast and reliable. For more details on how it works and how to configure it, see [docs/caching.md](docs/caching.md).
+
+## Directory Structure
+
+```
+$ISTIOENV_ROOT/
+├── versions/           # Installed istioctl versions
+│   ├── 1.24.0/
+│   │   └── istioctl    # istioctl binary
+│   └── 1.25.0/
+│       └── istioctl
+├── shims/
+│   └── istioctl        # Shim script (auto-generated)
+└── version             # Global version file
+```
+
+## Development
+
+### Run Tests
+
+```sh
+make test
+```
+
+### Run Docker Integration Tests
+
+```sh
+make test-docker
+```
+
+### Build
+
+```sh
+make build          # Current platform
+make build-all      # All platforms
+```
+
+## License
+
+See [LICENSE](LICENSE) for details.

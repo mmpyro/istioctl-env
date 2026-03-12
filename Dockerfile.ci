@@ -1,0 +1,26 @@
+FROM ubuntu:24.04
+
+# ── System dependencies ────────────────────────────────────────────────────────
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TERM=xterm
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    git \
+    bash \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── BATS and helpers ──────────────────────────────────────────────────────────
+RUN git clone https://github.com/bats-core/bats-core.git /tmp/bats-core \
+    && /tmp/bats-core/install.sh /usr/local \
+    && rm -rf /tmp/bats-core \
+    && git clone https://github.com/bats-core/bats-support.git /usr/local/lib/bats-support \
+    && git clone https://github.com/bats-core/bats-assert.git /usr/local/lib/bats-assert
+
+WORKDIR /src
+ENV ISTIOENV_ROOT=/src/.istioenv
+ENV PATH="/src:${ISTIOENV_ROOT}/shims:/usr/local/bin:/usr/local/go/bin:/usr/bin:/bin"
+COPY ./scripts /src/scripts
+COPY ./tests /src/tests
+ENTRYPOINT ["/bin/bash", "/src/scripts/run-bats.sh"]
