@@ -21,8 +21,8 @@ When `ISTIOENV_ROOT` is set, `istioctl-env` persists the merged list of versions
 ### Layer 3: Delta Fetch
 If the disk cache is stale (older than TTL) or missing, `istioctl-env` performs a "delta fetch" from the GitHub API.
 
-*   **Efficiency**: Instead of fetching all history, it only requests releases newer than the most recent version found in the stale cache (or the baseline).
-*   **Auto-Merge**: New releases are automatically merged with the existing known versions, deduplicated, and sorted.
+*   **Efficiency**: Instead of fetching all history, it only requests tag v1.0.0 newer than the most recent version found in the stale cache (or the baseline).
+*   **Auto-Merge**: New tag v1.0.0 are automatically merged with the existing known versions, deduplicated, and sorted.
 *   **Graceful Degradation**: If the network is unavailable during a delta fetch, `istioctl-env` will print a warning and fall back to the stale cache or the hardcoded baseline.
 
 ---

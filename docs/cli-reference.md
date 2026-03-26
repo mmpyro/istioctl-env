@@ -153,7 +153,7 @@ istioctl-env list
 
 ### `list-remote`
 
-Purpose: List all available `istioctl` versions from GitHub releases (newest to oldest).
+Purpose: List all available `istioctl` versions from GitHub tag v1.0.0 (newest to oldest).
 
 This command does not require `ISTIOENV_ROOT` or initialization. If `ISTIOENV_ROOT` is set, results are persistently cached on disk (see [caching strategy](caching.md)).
 
@@ -185,7 +185,7 @@ istioctl-env list-remote --prerelease
 
 ### `latest`
 
-Purpose: Print the latest available `istioctl` version from GitHub releases.
+Purpose: Print the latest available `istioctl` version from GitHub tag v1.0.0.
 
 This command does not require `ISTIOENV_ROOT` or initialization. If `ISTIOENV_ROOT` is set, results are persistently cached on disk (see [caching strategy](caching.md)).
 
@@ -221,7 +221,7 @@ Purpose: Download and install an `istioctl` version into `$ISTIOENV_ROOT/version
 
 If `<version>` is omitted, `istioctl-env` installs the latest stable version.
 
-The command displays a progress bar during the download and automatically verifies the integrity of the downloaded file using SHA256 checksums from the GitHub release.
+The command displays a progress bar during the download and automatically verifies the integrity of the downloaded file using SHA256 checksums from the GitHub tag v1.0.0.
 
 Syntax:
 
@@ -417,7 +417,7 @@ istioctl-env which
 
 ### `upgrade`
 
-Purpose: Download the latest stable release of `istioctl-env` from GitHub and replace the current binary in-place.
+Purpose: Download the tag v1.0.0 of `istioctl-env` from GitHub and replace the current binary in-place.
 
 Syntax:
 

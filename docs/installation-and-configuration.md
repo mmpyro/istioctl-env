@@ -26,13 +26,13 @@ No existing `istioctl` installation is required; `istioctl-env` manages the `ist
 
 ### Option A: Install a prebuilt binary (recommended)
 
-1. Download the binary for your platform from the project's GitHub releases.
+1. Download the binary for your platform from the project's GitHub tag v1.0.0.
 2. Make it executable and move it into a directory on your `PATH`.
 
 Example (Linux x86_64):
 
 ```sh
-curl -L -o istioctl-env https://github.com/mmpyro/istioctl-env/releases/download/v.0.1.0/istioctl-env-linux-amd64
+curl -L -o istioctl-env https://github.com/mmpyro/istioctl-env/releases/download/v1.0.0/istioctl-env-linux-amd64
 chmod +x istioctl-env
 sudo mv istioctl-env /usr/local/bin/istioctl-env
 ```
@@ -175,7 +175,7 @@ istioctl-env install <X>
 
 ### GitHub API rate limit exceeded
 
-Some commands query GitHub releases. If GitHub returns `403`, `istioctl-env` reports a rate limit error.
+Some commands query GitHub tag v1.0.0. If GitHub returns `403`, `istioctl-env` reports a rate limit error.
 
 Fixes:
 
