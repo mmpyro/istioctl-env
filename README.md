@@ -126,6 +126,7 @@ Full reference: [docs/cli-reference.md](docs/cli-reference.md)
 |---------|-------------|
 | `istioctl-env help` | Display help and all available commands |
 | `istioctl-env list` | List all installed versions |
+| `istioctl-env list --disk-usage` | List installed versions with on-disk size and a TOTAL row |
 | `istioctl-env list-remote` | List all available istioctl versions from GitHub |
 | `istioctl-env list-remote --prerelease` | Include pre-release istioctl versions |
 | `istioctl-env latest` | Print the latest available version of istioctl from GitHub |
@@ -133,6 +134,7 @@ Full reference: [docs/cli-reference.md](docs/cli-reference.md)
 | `istioctl-env status` | Show current environment status |
 | `istioctl-env install [VERSION]` | Install a specific version (or latest) |
 | `istioctl-env uninstall VERSION` | Uninstall a specific version |
+| `istioctl-env prune` | Dry-run removal of unreferenced versions (use `--yes` to apply) |
 | `istioctl-env exec VERSION CMD` | Run a command using a specific istioctl version |
 | `istioctl-env shell [VERSION]` | Set/show shell version (`ISTIOENV_VERSION`) |
 | `istioctl-env local [VERSION]` | Set/show local version (`.istioctl-version`) |

@@ -55,5 +55,8 @@ func TestStatus(t *testing.T) {
 		if !strings.Contains(output, "  0.30.0") {
 			t.Errorf("expected output to contain other versions, got %q", output)
 		}
+		if !strings.Contains(output, "Total disk usage:") {
+			t.Errorf("expected output to contain Total disk usage summary, got %q", output)
+		}
 	})
 }
