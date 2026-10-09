@@ -49,6 +49,12 @@ func TestGenerateShimScript(t *testing.T) {
 		if !strings.Contains(content, "exec") {
 			t.Fatal("shim should exec the binary")
 		}
+		if !strings.Contains(content, "istioctl-env resolve") {
+			t.Fatal("shim should delegate to 'istioctl-env resolve' for constraint handling")
+		}
+		if !strings.Contains(content, "ISTIOENV_AUTO_INSTALL") {
+			t.Fatal("shim should mention ISTIOENV_AUTO_INSTALL in guidance")
+		}
 	})
 
 	t.Run("creates shims directory", func(t *testing.T) {

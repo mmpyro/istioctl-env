@@ -19,7 +19,7 @@ func TestAutocompletion(t *testing.T) {
 			t.Errorf("output should contain completion definition, got: %q", output)
 		}
 
-		if !strings.Contains(output, "opts=\"help list list-remote init install uninstall prune shell local global latest which exec status upgrade doctor version\"") {
+		if !strings.Contains(output, "opts=\"help list list-remote init install uninstall prune shell local global latest which exec resolve status upgrade doctor version\"") {
 			t.Errorf("output should contain subcommands list, got: %q", output)
 		}
 	})

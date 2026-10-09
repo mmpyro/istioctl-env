@@ -21,6 +21,7 @@ Commands:
   latest          Print the latest available version of istioctl cli from GitHub releases.
   which           Print the full path to the active istioctl binary
   exec            Run a command using a specific istioctl version
+  resolve         Resolve the active version expression to a concrete version
   status          Show current istioctl-env environment status
   upgrade         Upgrade istioctl-env to the latest version
   autocompletion  Generate bash autocompletion script
@@ -36,7 +37,18 @@ Global flags (equivalent env var in parentheses):
 
 // InstallHelp prints help for the install command.
 func InstallHelp() {
-	fmt.Println(`Usage: istioctl-env install [version] [flags]
+	fmt.Println(`Usage: istioctl-env install [version-or-constraint] [flags]
+
+With no argument, the nearest .istioctl-version file is consulted; if there
+is no such file, the latest stable release is installed.
+
+The argument may be:
+  - an exact pin:          1.24.0
+  - a tilde range:         ~1.24.0        (>=1.24.0, <1.25.0)
+  - a caret range:         ^1.24.0        (>=1.24.0, <2.0.0)
+  - an explicit interval:  ">=1.24.0 <1.26.0"
+  - the latest alias:      latest
+  - with pre-releases:     latest-prerelease
 
 Flags:
   -s, --silent    Do not display progress bar or checksum info`)

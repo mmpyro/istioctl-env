@@ -48,6 +48,36 @@ Optional. When set, it forces a particular `istioctl` version to be used (highes
 
 Typically set via `istioctl-env shell` after enabling shell integration with `eval "$(istioctl-env init)"`.
 
+### `ISTIOENV_AUTO_INSTALL`
+
+Optional. When set to a truthy value (`1`, `true`, `yes`, `on`), the `istioctl`
+shim will automatically install missing versions on first use rather than
+failing. This mirrors `nvm`'s auto-install behaviour.
+
+Combined with constraints in `.istioctl-version`, this makes a fresh clone of
+a repository "just work" for new contributors.
+
+## Version expressions
+
+Everywhere a version argument is accepted (`.istioctl-version`,
+`$ISTIOENV_ROOT/version`, `ISTIOENV_VERSION`, `istioctl-env local/global/shell
+<version>`, `istioctl-env install <version>`), the value may be any of:
+
+| Expression | Meaning |
+|---|---|
+| `1.24.0` | Exact pin |
+| `~1.24.0` | `>=1.24.0, <1.25.0` (patch range) |
+| `^1.24.0` | `>=1.24.0, <2.0.0` (minor range) |
+| `^0.31.0` | `>=0.31.0, <0.32.0` (zero-major: minor-anchored, SemVer convention) |
+| `>=1.24.0 <1.26.0` | Explicit interval (space- or comma-separated) |
+| `latest` | Newest stable release |
+| `latest-prerelease` | Newest release including pre-releases |
+
+Constraints are resolved at `istioctl` invocation time: the shim picks the
+newest installed version satisfying the expression. If none is installed, the
+shim prints an actionable error (or auto-installs when `ISTIOENV_AUTO_INSTALL`
+is set).
+
 ## Commands
 
 ### `help`
@@ -255,14 +285,22 @@ istioctl-env latest
 
 Purpose: Download and install an `istioctl` version into `$ISTIOENV_ROOT/versions/<version>/istioctl`.
 
-If `<version>` is omitted, `istioctl-env` installs the latest stable version.
+Argument semantics:
+
+- An exact pin (`1.24.0`): downloaded as-is.
+- A SemVer constraint (`~1.24.0`, `^1.24.0`, `>=1.24.0 <1.26.0`, `latest`,
+  `latest-prerelease`): the remote release list is consulted and the newest
+  matching version is installed. The resolution is printed as
+  `Resolved <expr> → <concrete>` unless `--silent` is passed.
+- Omitted: the nearest `.istioctl-version` file is consulted (walking up from
+  the current directory). If no such file exists, `latest` is used.
 
 The command displays a progress bar during the download and automatically verifies the integrity of the downloaded file using SHA256 checksums from the GitHub tag v1.0.0.
 
 Syntax:
 
 ```text
-istioctl-env install [version] [flags]
+istioctl-env install [version-or-constraint] [flags]
 ```
 
 Options/flags:
@@ -282,9 +320,12 @@ Exit codes:
 Example:
 
 ```sh
-istioctl-env install 1.24.0
+istioctl-env install 1.24.0           # exact pin
+istioctl-env install ~1.24.0          # latest 1.24.x
+istioctl-env install "^1.24.0"        # highest 1.x matching
+istioctl-env install latest-prerelease
+istioctl-env install                  # resolve from .istioctl-version
 istioctl-env install --silent
-istioctl-env install
 ```
 
 ---
@@ -387,7 +428,12 @@ ISTIOENV_PRUNE_SCAN_ROOTS="$HOME/code:$HOME/work" istioctl-env prune --yes
 
 ### `shell`
 
-Purpose: Set or show the shell-level `istioctl` version.
+Purpose: Set or show the shell-level `istioctl` version expression.
+
+Accepts any [version expression](#version-expressions) — plain pin, tilde,
+caret, interval, or `latest` / `latest-prerelease`. The set-time check only
+validates that the expression parses; the shim verifies installed-ness at
+exec time (and may auto-install when `ISTIOENV_AUTO_INSTALL=true`).
 
 Important: To *set* the version for your current shell session, you must have shell integration enabled via `eval "$(istioctl-env init)"`. Otherwise, you will only see the printed `export ...` line but your current shell will not be updated.
 
@@ -395,7 +441,7 @@ Syntax:
 
 ```text
 istioctl-env shell            # show
-istioctl-env shell <version>  # set
+istioctl-env shell <expression>  # set
 ```
 
 Options/flags: none.
@@ -408,13 +454,14 @@ Environment variables:
 Exit codes:
 
 - `0` on success.
-- `1` if not initialized, no shell version is configured (show), or the requested version is not installed (set).
+- `1` if not initialized, no shell version is configured (show), or the expression is unparseable.
 
 Example:
 
 ```sh
 eval "$(istioctl-env init)"
 istioctl-env shell 1.24.0
+istioctl-env shell "^1.24.0"
 istioctl version
 ```
 
@@ -422,15 +469,19 @@ istioctl version
 
 ### `local`
 
-Purpose: Set or show the local (directory-level) `istioctl` version.
+Purpose: Set or show the local (directory-level) `istioctl` version expression.
 
-Setting writes a `.istioctl-version` file into the current directory.
+Accepts any [version expression](#version-expressions). Setting writes the
+expression verbatim into a `.istioctl-version` file in the current directory.
+The set-time check only validates parsing; actual installed-ness is enforced
+by the shim at exec time (and optionally auto-installed when
+`ISTIOENV_AUTO_INSTALL=true`).
 
 Syntax:
 
 ```text
-istioctl-env local            # show
-istioctl-env local <version>  # set
+istioctl-env local               # show
+istioctl-env local <expression>  # set
 ```
 
 Options/flags: none.
@@ -442,13 +493,14 @@ Environment variables:
 Exit codes:
 
 - `0` on success.
-- `1` if not initialized, no local version is configured for this directory (show), the requested version is not installed (set), or writing `.istioctl-version` fails.
+- `1` if not initialized, no local version is configured for this directory (show), the expression is unparseable, or writing `.istioctl-version` fails.
 
 Example:
 
 ```sh
 istioctl-env install 1.24.0
 istioctl-env local 1.24.0
+istioctl-env local "~1.24.0"   # pin to the 1.24.x train
 istioctl version
 ```
 
@@ -456,15 +508,18 @@ istioctl version
 
 ### `global`
 
-Purpose: Set or show the global default `istioctl` version.
+Purpose: Set or show the global default `istioctl` version expression.
 
-Setting writes `$ISTIOENV_ROOT/version`.
+Accepts any [version expression](#version-expressions). Setting writes the
+expression verbatim into `$ISTIOENV_ROOT/version`. The set-time check only
+validates parsing; actual installed-ness is enforced by the shim at exec time
+(and optionally auto-installed when `ISTIOENV_AUTO_INSTALL=true`).
 
 Syntax:
 
 ```text
-istioctl-env global            # show
-istioctl-env global <version>  # set
+istioctl-env global               # show
+istioctl-env global <expression>  # set
 ```
 
 Options/flags: none.
@@ -476,13 +531,14 @@ Environment variables:
 Exit codes:
 
 - `0` on success.
-- `1` if not initialized, no global version is configured (show), the requested version is not installed (set), or writing fails.
+- `1` if not initialized, no global version is configured (show), the expression is unparseable, or writing fails.
 
 Example:
 
 ```sh
 istioctl-env install 1.24.0
 istioctl-env global 1.24.0
+istioctl-env global "^1.24.0"
 istioctl version
 ```
 
@@ -491,6 +547,10 @@ istioctl version
 ### `which`
 
 Purpose: Print the full path to the active `istioctl` binary that would be used based on version resolution.
+
+If the active expression is a SemVer constraint, the resolution step is
+printed to stderr (e.g. `^1.24.0 → 1.24.3`) so stdout remains a clean,
+scriptable binary path.
 
 Syntax:
 
@@ -508,12 +568,52 @@ Environment variables:
 Exit codes:
 
 - `0` on success.
-- `1` if not initialized or no version is configured.
+- `1` if not initialized, no version is configured, or no installed version satisfies the constraint.
 
 Example:
 
 ```sh
 istioctl-env which
+```
+
+---
+
+### `resolve`
+
+Purpose: Resolve the active version expression (shell > local > global) to a
+concrete installed version and print it on stdout. Primarily used by the
+`istioctl` shim; also useful for scripts that need the resolved version.
+
+With `--install`, missing versions are installed on-the-fly (equivalent to
+setting `ISTIOENV_AUTO_INSTALL=true`).
+
+Syntax:
+
+```text
+istioctl-env resolve [flags]
+```
+
+Options/flags:
+
+- `--install`: install the best matching remote version when no installed version satisfies the expression
+- `-s`, `--silent`: suppress installer progress output (recommended for non-TTY callers)
+- `-h`, `--help`: show command help and exit
+
+Environment variables:
+
+- `ISTIOENV_ROOT` (required)
+- `ISTIOENV_AUTO_INSTALL` (optional; when truthy, acts as `--install`)
+
+Exit codes:
+
+- `0` on success — the concrete version is printed on stdout.
+- `1` if not initialized, no version configured, no installed match (without `--install`), or the install itself fails.
+
+Example:
+
+```sh
+# Called by the shim's slow path.
+istioctl-env resolve --silent
 ```
 
 ---

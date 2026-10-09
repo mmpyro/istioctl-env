@@ -11,6 +11,11 @@ import (
 )
 
 // Status provides an overview of the current istioctl-env environment.
+//
+// When the active expression is a SemVer constraint, both the raw expression
+// and the resolved concrete version are shown, e.g.
+//
+//	Active version: ^1.24.0 → 1.24.3 (set by .istioctl-version file)
 func Status() error {
 	root, ok := config.GetIstioEnvRoot()
 	if !ok {
@@ -22,12 +27,25 @@ func Status() error {
 
 	fmt.Fprintf(w, "ISTIOENV_ROOT:\t%s\n", root)
 
-	version, source := getActiveVersionWithSource()
-	if version == "" {
+	rawVersion, source := getActiveVersionWithSource()
+	var resolvedVersion string
+	if rawVersion == "" {
 		fmt.Fprintf(w, "Active version:\tnone\n")
 	} else {
-		fmt.Fprintf(w, "Active version:\t%s (set by %s)\n", version, source)
-		binaryPath, _ := config.GetBinaryPath(version)
+		resolvedVersion = resolveForStatus(rawVersion)
+		display := rawVersion
+		if resolvedVersion != "" && resolvedVersion != rawVersion {
+			display = fmt.Sprintf("%s → %s", rawVersion, resolvedVersion)
+		} else if resolvedVersion == "" && semver.IsConstraint(rawVersion) {
+			display = fmt.Sprintf("%s → (no installed version matches)", rawVersion)
+		}
+		fmt.Fprintf(w, "Active version:\t%s (set by %s)\n", display, source)
+
+		pathTarget := resolvedVersion
+		if pathTarget == "" {
+			pathTarget = rawVersion
+		}
+		binaryPath, _ := config.GetBinaryPath(pathTarget)
 		fmt.Fprintf(w, "Binary path:\t%s\n", binaryPath)
 	}
 	w.Flush()
@@ -48,13 +66,18 @@ func Status() error {
 	installed = semver.SortDescending(installed)
 	fmt.Printf("\nInstalled versions (%d):\n", len(installed))
 
+	activeConcrete := resolvedVersion
+	if activeConcrete == "" {
+		activeConcrete = rawVersion
+	}
+
 	// Compute total disk usage alongside the listing.  A size failure on a
 	// single version is best-effort: we skip the broken directory and keep
 	// going so `status` is never prevented from reporting the environment.
 	var totalBytes int64
 	for _, v := range installed {
 		marker := "  "
-		if v == version {
+		if v == activeConcrete {
 			marker = "* "
 		}
 		if size, sizeErr := dirSize(filepath.Join(versionsDir, v)); sizeErr == nil {
@@ -67,6 +90,25 @@ func Status() error {
 
 	fmt.Printf("\nTotal disk usage: %s\n", humanize(totalBytes))
 	return nil
+}
+
+// resolveForStatus returns the concrete installed version matching raw, or ""
+// when raw is a constraint that doesn't match anything installed. Errors are
+// swallowed on purpose: Status is best-effort reporting.
+func resolveForStatus(raw string) string {
+	if !semver.IsConstraint(raw) {
+		return raw
+	}
+	constraint, err := semver.ParseConstraint(raw)
+	if err != nil {
+		return ""
+	}
+	installed, err := config.ListInstalledVersions()
+	if err != nil || len(installed) == 0 {
+		return ""
+	}
+	match, _ := semver.HighestMatching(constraint, installed)
+	return match
 }
 
 func getActiveVersionWithSource() (string, string) {

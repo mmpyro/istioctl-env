@@ -16,8 +16,18 @@ import (
 	"github.com/user/istioctl-env/internal/platform"
 )
 
-// Install downloads and installs a specific istioctl version.
-// If version is empty, it fetches the latest stable release.
+// Install downloads and installs a specific istioctl version or the best
+// match for a SemVer constraint.
+//
+// Behaviour:
+//
+//   - If version is a plain exact pin (e.g. "1.24.0"), that version is
+//     downloaded directly.
+//   - If version is empty, the nearest .istioctl-version is consulted;
+//     when no such file is present, "latest" is used.
+//   - If version is a constraint ("^1.24.0", ">=1.24.0 <1.26.0", "latest",
+//     "latest-prerelease", ...), the remote release list is consulted and
+//     the newest matching version is installed.
 func Install(version string, silent bool) error {
 	client := github.NewClient()
 	return installWithClient(client, version, silent)
@@ -28,22 +38,24 @@ func installWithClient(client *github.Client, version string, silent bool) error
 		return err
 	}
 
-	// If no version specified, fetch latest. Latest resolution needs the
-	// GitHub API, so bail out early with a clear message when running
-	// offline rather than letting a network error bubble up.
-	if version == "" {
-		if github.IsOffline() {
-			return fmt.Errorf("cannot determine latest version while ISTIOENV_OFFLINE=1; please specify a version explicitly")
-		}
-		latest, err := client.GetLatestRelease()
-		if err != nil {
-			return fmt.Errorf("failed to fetch latest version: %w", err)
-		}
-		version = latest
-		if !silent {
-			fmt.Printf("Latest version: %s\n", version)
-		}
+	// When no version is specified, resolution falls back to "latest" (or
+	// the nearest .istioctl-version). Latest resolution needs the GitHub
+	// API, so bail out early with a clear message when running offline
+	// rather than letting the fallback silently install the hardcoded
+	// baseline version.
+	if strings.TrimSpace(version) == "" && github.IsOffline() {
+		return fmt.Errorf("cannot determine latest version while ISTIOENV_OFFLINE=1; please specify a version explicitly")
 	}
+
+	resolved, raw, err := resolveSpecForInstall(client, version)
+	if err != nil {
+		return err
+	}
+	if !silent && raw != resolved {
+		fmt.Printf("Resolved %s → %s\n", raw, resolved)
+	}
+	// From here on, `version` is the concrete resolved version.
+	version = resolved
 
 	// Check if already installed
 	installed, err := config.IsVersionInstalled(version)

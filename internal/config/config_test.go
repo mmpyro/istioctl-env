@@ -281,6 +281,167 @@ func TestGetBinaryPath(t *testing.T) {
 	})
 }
 
+func TestListInstalledVersions(t *testing.T) {
+	t.Run("returns nothing when ISTIOENV_ROOT unset", func(t *testing.T) {
+		t.Setenv("ISTIOENV_ROOT", "")
+		_, err := ListInstalledVersions()
+		if err == nil {
+			t.Fatal("expected error when ISTIOENV_ROOT not set")
+		}
+	})
+
+	t.Run("returns empty when versions dir missing", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		t.Setenv("ISTIOENV_ROOT", tmpDir)
+		got, err := ListInstalledVersions()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("expected empty, got %v", got)
+		}
+	})
+
+	t.Run("returns only versions with istioctl binary", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		t.Setenv("ISTIOENV_ROOT", tmpDir)
+		for _, v := range []string{"1.24.0", "1.25.0"} {
+			dir := filepath.Join(tmpDir, "versions", v)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "istioctl"), []byte("x"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// Directory without binary → ignored.
+		if err := os.MkdirAll(filepath.Join(tmpDir, "versions", "garbage"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		got, err := ListInstalledVersions()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("expected 2 versions, got %v", got)
+		}
+	})
+}
+
+func TestResolveInstalledVersion(t *testing.T) {
+	setupInstalled := func(t *testing.T, versions ...string) string {
+		t.Helper()
+		tmpDir := t.TempDir()
+		t.Setenv("ISTIOENV_ROOT", tmpDir)
+		for _, v := range versions {
+			dir := filepath.Join(tmpDir, "versions", v)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "istioctl"), []byte("x"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return tmpDir
+	}
+
+	t.Run("plain version is returned as-is", func(t *testing.T) {
+		setupInstalled(t)
+		t.Setenv("ISTIOENV_VERSION", "1.24.0")
+		resolved, raw, err := ResolveInstalledVersion()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resolved != "1.24.0" || raw != "1.24.0" {
+			t.Fatalf("got (%q, %q), want (1.24.0, 1.24.0)", resolved, raw)
+		}
+	})
+
+	t.Run("caret picks highest installed", func(t *testing.T) {
+		setupInstalled(t, "1.24.0", "1.24.3", "1.25.0", "2.0.0")
+		t.Setenv("ISTIOENV_VERSION", "^1.24.0")
+		resolved, raw, err := ResolveInstalledVersion()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resolved != "1.25.0" {
+			t.Fatalf("resolved = %q, want 1.25.0", resolved)
+		}
+		if raw != "^1.24.0" {
+			t.Fatalf("raw = %q, want ^1.24.0", raw)
+		}
+	})
+
+	t.Run("errors when no installed matches", func(t *testing.T) {
+		setupInstalled(t, "1.24.0")
+		t.Setenv("ISTIOENV_VERSION", "^2.0.0")
+		_, _, err := ResolveInstalledVersion()
+		if err == nil {
+			t.Fatal("expected error when no installed matches")
+		}
+	})
+
+	t.Run("errors when nothing installed", func(t *testing.T) {
+		setupInstalled(t)
+		t.Setenv("ISTIOENV_VERSION", "^1.24.0")
+		_, _, err := ResolveInstalledVersion()
+		if err == nil {
+			t.Fatal("expected error when nothing installed")
+		}
+	})
+
+	t.Run("precedence: shell constraint overrides local plain", func(t *testing.T) {
+		tmpDir := setupInstalled(t, "1.24.0", "1.25.0")
+		t.Setenv("ISTIOENV_VERSION", "^1.24.0")
+
+		// Also write a local version pointing to 1.24.0.
+		workDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(workDir, ".istioctl-version"), []byte("1.24.0\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		origDir, _ := os.Getwd()
+		if err := os.Chdir(workDir); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = os.Chdir(origDir) }()
+		_ = tmpDir
+
+		resolved, raw, err := ResolveInstalledVersion()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resolved != "1.25.0" || raw != "^1.24.0" {
+			t.Fatalf("got (%q, %q), want (1.25.0, ^1.24.0)", resolved, raw)
+		}
+	})
+
+	t.Run("precedence: local plain overrides global constraint", func(t *testing.T) {
+		tmpDir := setupInstalled(t, "1.24.0", "1.25.0")
+		t.Setenv("ISTIOENV_VERSION", "")
+		if err := os.WriteFile(filepath.Join(tmpDir, "version"), []byte("^1.24.0\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		workDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(workDir, ".istioctl-version"), []byte("1.24.0\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		origDir, _ := os.Getwd()
+		if err := os.Chdir(workDir); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = os.Chdir(origDir) }()
+
+		resolved, raw, err := ResolveInstalledVersion()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resolved != "1.24.0" || raw != "1.24.0" {
+			t.Fatalf("got (%q, %q), want (1.24.0, 1.24.0)", resolved, raw)
+		}
+	})
+}
+
 func TestIsVersionInstalled(t *testing.T) {
 	t.Run("returns true when installed", func(t *testing.T) {
 		tmpDir := t.TempDir()

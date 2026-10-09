@@ -28,6 +28,9 @@ Latest tag v1.0.0: **v1.0.0** (tag: `v1.0.0`).
 - Automatic version switching based on project directory (`.istioctl-version`)
 - Shell-level, local (directory), and global version configuration
 - Version priority: shell > local > global
+- SemVer constraints in `.istioctl-version` (`~1.24.0`, `^1.24.0`,
+  `>=1.24.0 <1.26.0`, `latest`, `latest-prerelease`) resolved by the shim
+- Opt-in auto-install (`ISTIOENV_AUTO_INSTALL=true`) for fresh checkouts
 - Auto-detection of OS and architecture for binary downloads
 - Shim-based transparent proxying of `istioctl` commands
 
@@ -141,6 +144,7 @@ Full reference: [docs/cli-reference.md](docs/cli-reference.md)
 | `istioctl-env global [VERSION]` | Set/show global version (`$ISTIOENV_ROOT/version`) |
 | `istioctl-env which` | Print path to active istioctl binary |
 | `istioctl-env doctor [--fix] [--deep]` | Diagnose the environment and print OK/WARN/FAIL per check (optionally auto-repair; `--deep` also re-verifies installed binaries against GitHub checksums) |
+| `istioctl-env resolve [--install]` | Resolve the active expression to a concrete version |
 | `istioctl-env version` | Print istioctl-env version |
 
 ### Global flags
@@ -158,13 +162,38 @@ See [docs/installation-and-configuration.md](docs/installation-and-configuration
 
 ## Version Priority
 
-When `istioctl` is invoked, the version is resolved in this order:
+When `istioctl` is invoked, the version expression is resolved in this order:
 
 1. **Shell** — `ISTIOENV_VERSION` environment variable (set via `istioctl-env shell`)
 2. **Local** — `.istioctl-version` file in the current or parent directories (set via `istioctl-env local`)
 3. **Global** — `$ISTIOENV_ROOT/version` file (set via `istioctl-env global`)
 
+The value may be an exact pin or any SemVer constraint. See
+[Version expressions](docs/cli-reference.md#version-expressions) for the full
+grammar; a quick summary:
+
+| Expression | Example resolves to |
+|---|---|
+| `1.24.0` | `1.24.0` (exact) |
+| `~1.24.0` | newest installed `1.24.x` |
+| `^1.24.0` | newest installed `1.x` matching `>=1.24.0` |
+| `>=1.24.0 <1.26.0` | newest installed in that interval |
+| `latest` | newest installed stable version |
+| `latest-prerelease` | newest installed (incl. pre-releases) |
+
 If no version is configured at any level, the command fails with an informative error.
+
+### Auto-install
+
+Set `ISTIOENV_AUTO_INSTALL=true` in your shell to have the shim install
+missing versions on first use:
+
+```sh
+export ISTIOENV_AUTO_INSTALL=true
+```
+
+This mirrors `nvm`'s auto-install behaviour and makes a fresh clone of a
+repository with a `.istioctl-version` file work out of the box.
 
 ## Shell Setup
 

@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/user/istioctl-env/internal/semver"
 )
 
 // GetIstioEnvRoot reads the ISTIOENV_ROOT environment variable.
@@ -160,4 +162,74 @@ func IsVersionInstalled(version string) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// ListInstalledVersions returns all versions that are installed under
+// $ISTIOENV_ROOT/versions (i.e. directories whose "istioctl" binary exists).
+func ListInstalledVersions() ([]string, error) {
+	root, ok := GetIstioEnvRoot()
+	if !ok {
+		return nil, fmt.Errorf("ISTIOENV_ROOT not set")
+	}
+	versionsDir := filepath.Join(root, "versions")
+	entries, err := os.ReadDir(versionsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read versions directory: %w", err)
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		binaryPath := filepath.Join(versionsDir, e.Name(), "istioctl")
+		if _, err := os.Stat(binaryPath); err == nil {
+			out = append(out, e.Name())
+		}
+	}
+	return out, nil
+}
+
+// ResolveInstalledVersion resolves the configured version expression (the
+// output of ResolveVersion) to a concrete installed version string.
+//
+//   - If the expression is a plain exact version it is returned unchanged
+//     (and no installed-ness check is performed here — the caller may wish
+//     to check IsVersionInstalled for a friendlier error message).
+//   - If the expression is a constraint, the highest INSTALLED version
+//     matching the constraint is returned. If none matches, an error is
+//     returned describing the situation.
+//
+// The second return value is the raw (configured) expression, so callers
+// such as `which` and `status` can display both.
+func ResolveInstalledVersion() (resolved string, raw string, err error) {
+	raw, err = ResolveVersion()
+	if err != nil {
+		return "", "", err
+	}
+
+	if !semver.IsConstraint(raw) {
+		return raw, raw, nil
+	}
+
+	constraint, err := semver.ParseConstraint(raw)
+	if err != nil {
+		return "", raw, fmt.Errorf("invalid version expression %q: %w", raw, err)
+	}
+
+	installed, err := ListInstalledVersions()
+	if err != nil {
+		return "", raw, err
+	}
+	if len(installed) == 0 {
+		return "", raw, fmt.Errorf("no installed versions match %q (none installed). Try 'istioctl-env install %s'", raw, raw)
+	}
+
+	match, ok := semver.HighestMatching(constraint, installed)
+	if !ok {
+		return "", raw, fmt.Errorf("no installed version satisfies %q. Try 'istioctl-env install %s'", raw, raw)
+	}
+	return match, raw, nil
 }
