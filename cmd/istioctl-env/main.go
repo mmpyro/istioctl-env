@@ -35,13 +35,36 @@ func main() {
 		commands.PrintVersion()
 
 	case "init":
-		err = commands.Init()
+		shell := ""
+		for i := 1; i < len(args); i++ {
+			arg := args[i]
+			switch {
+			case arg == "-h" || arg == "--help":
+				commands.InitHelp()
+				os.Exit(0)
+			case arg == "--shell":
+				if i+1 >= len(args) {
+					fmt.Fprintln(os.Stderr, "--shell requires a value (bash|zsh|fish)")
+					os.Exit(1)
+				}
+				shell = args[i+1]
+				i++
+			case strings.HasPrefix(arg, "--shell="):
+				shell = strings.TrimPrefix(arg, "--shell=")
+			default:
+				fmt.Fprintf(os.Stderr, "Unknown argument for init: %s\n", arg)
+				commands.InitHelp()
+				os.Exit(1)
+			}
+		}
+		err = commands.Init(shell)
 
 	case "list":
 		err = commands.List()
 
 	case "list-remote":
 		includePrerelease := false
+		cached := false
 		for _, arg := range args[1:] {
 			switch arg {
 			case "-h", "--help":
@@ -49,9 +72,15 @@ func main() {
 				os.Exit(0)
 			case "--prerelease":
 				includePrerelease = true
+			case "--cached":
+				cached = true
 			}
 		}
-		err = commands.ListRemote(includePrerelease)
+		if cached {
+			err = commands.ListRemoteCached(includePrerelease)
+		} else {
+			err = commands.ListRemote(includePrerelease)
+		}
 
 	case "latest":
 		includePrerelease := false
@@ -116,13 +145,29 @@ func main() {
 		err = commands.Upgrade()
 
 	case "autocompletion":
-		for _, arg := range args[1:] {
-			if arg == "-h" || arg == "--help" {
+		shell := ""
+		for i := 1; i < len(args); i++ {
+			arg := args[i]
+			switch {
+			case arg == "-h" || arg == "--help":
 				commands.AutocompletionHelp()
 				os.Exit(0)
+			case arg == "--shell":
+				if i+1 >= len(args) {
+					fmt.Fprintln(os.Stderr, "--shell requires a value (bash|zsh|fish)")
+					os.Exit(1)
+				}
+				shell = args[i+1]
+				i++
+			case strings.HasPrefix(arg, "--shell="):
+				shell = strings.TrimPrefix(arg, "--shell=")
+			default:
+				fmt.Fprintf(os.Stderr, "Unknown argument for autocompletion: %s\n", arg)
+				commands.AutocompletionHelp()
+				os.Exit(1)
 			}
 		}
-		err = commands.Autocompletion()
+		err = commands.Autocompletion(shell)
 
 	case "status":
 		err = commands.Status()

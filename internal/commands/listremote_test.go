@@ -380,6 +380,80 @@ func TestListRemote(t *testing.T) {
 	})
 }
 
+func TestListRemoteCached(t *testing.T) {
+	t.Run("returns disk cache without hitting the network", func(t *testing.T) {
+		root := t.TempDir()
+		// Deliberately store versions that are NOT in the baked-in baseline
+		// so we can tell whether the cache was consulted.
+		c := cache.NewWithTTL(root+"/cache", time.Hour)
+		stable := []string{"99.99.99", "99.99.98"}
+		pre := []string{"99.99.99", "99.99.98-rc.1"}
+		if err := c.Save(stable, pre); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		t.Setenv("ISTIOENV_ROOT", root)
+
+		out := captureStdout(t, func() {
+			if err := ListRemoteCached(false); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+		if !strings.Contains(out, "99.99.99") || !strings.Contains(out, "99.99.98") {
+			t.Fatalf("expected cached stable versions in output, got:\n%s", out)
+		}
+
+		out = captureStdout(t, func() {
+			if err := ListRemoteCached(true); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+		if !strings.Contains(out, "99.99.98-rc.1") {
+			t.Fatalf("expected cached prerelease in output, got:\n%s", out)
+		}
+	})
+
+	t.Run("returns stale cache (bypasses TTL)", func(t *testing.T) {
+		root := t.TempDir()
+		// Save with a TTL that would normally mark the cache as stale.
+		c := cache.NewWithTTL(root+"/cache", -time.Hour)
+		if err := c.Save([]string{"77.77.77"}, []string{"77.77.77"}); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		t.Setenv("ISTIOENV_ROOT", root)
+
+		out := captureStdout(t, func() {
+			if err := ListRemoteCached(false); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+		if !strings.Contains(out, "77.77.77") {
+			t.Fatalf("expected stale cache contents to be returned, got:\n%s", out)
+		}
+	})
+
+	t.Run("falls back to baseline when no cache", func(t *testing.T) {
+		// ISTIOENV_ROOT not set → no on-disk cache available at all.
+		t.Setenv("ISTIOENV_ROOT", "")
+
+		out := captureStdout(t, func() {
+			if err := ListRemoteCached(false); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+
+		// At minimum the baseline must contain the oldest known version
+		// "1.24.0", which is guaranteed to be present forever (see
+		// internal/cache/baseline.go). Any string change there should
+		// prompt updating this assertion.
+		if strings.TrimSpace(out) == "" {
+			t.Fatalf("expected baseline fallback output, got empty")
+		}
+		if !strings.Contains(out, "1.24.0") {
+			t.Fatalf("expected baseline to contain 1.24.0, got:\n%s", out)
+		}
+	})
+}
+
 func TestListRemoteWithMockClient(t *testing.T) {
 	releases := []github.Release{
 		{TagName: "v0.30.0", Prerelease: false, Draft: false},

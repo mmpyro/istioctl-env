@@ -94,30 +94,40 @@ Purpose:
 
 - Create required directories under `ISTIOENV_ROOT`.
 - Generate the `istioctl` shim under `$ISTIOENV_ROOT/shims/istioctl`.
-- Print shell initialization code to stdout (intended to be evaluated by your shell).
+- Print shell initialization code to stdout for the requested shell
+  (intended to be evaluated/sourced by your shell).
 
 Syntax:
 
 ```text
-istioctl-env init
+istioctl-env init [--shell <bash|zsh|fish>]
 ```
 
-Options/flags: none.
+Options/flags:
+
+- `--shell <name>`: emit integration code for the named shell. When omitted,
+  `istioctl-env` auto-detects the shell from `$SHELL`. If detection fails,
+  it falls back to `bash` and prints a `WARN` to stderr.
+- `-h`, `--help`: show command help and exit.
 
 Environment variables:
 
 - `ISTIOENV_ROOT` (required)
+- `SHELL` (read for auto-detection)
 
 Exit codes:
 
 - `0` on success.
-- `1` if `ISTIOENV_ROOT` is not set or filesystem operations fail.
+- `1` if `ISTIOENV_ROOT` is not set, if `--shell` has an unknown value, or if
+  filesystem operations fail.
 
 Example:
 
 ```sh
 export ISTIOENV_ROOT="$HOME/.istioenv"
-eval "$(istioctl-env init)"
+eval "$(istioctl-env init)"                 # auto-detect
+eval "$(istioctl-env init --shell zsh)"     # explicit zsh
+istioctl-env init --shell fish | source     # fish
 ```
 
 ---
@@ -166,6 +176,10 @@ istioctl-env list-remote [flags]
 Options/flags:
 
 - `--prerelease`: include pre-release versions (alpha, beta, rc)
+- `--cached`: print the on-disk cached list only, never performing a network
+  call. Falls back to the built-in baseline when the cache is missing. This
+  flag is intended for shell completion scripts that need a fast, offline
+  answer on every TAB.
 - `-h`, `--help`: show command help and exit
 
 Environment variables: none.
@@ -602,30 +616,46 @@ istioctl-env doctor --fix --deep   # repair, then verify
 
 ### `autocompletion`
 
-Purpose: Generate bash autocompletion script for `istioctl-env`.
+Purpose: Generate an idiomatic shell completion script for `istioctl-env`.
 
-The script provides completion for subcommands and suggests installed versions for commands that accept a version argument (`install`, `uninstall`, `shell`, `local`, `global`, `exec`).
+The script completes subcommands and version arguments. For `install`, it
+offers **remote** versions read from the on-disk release cache (via
+`istioctl-env list-remote --cached`, which never hits the network). For
+`uninstall`, `shell`, `local`, `global`, and `exec`, it offers **installed**
+versions via `istioctl-env list`. Flags such as `--prerelease`, `--cached`,
+`--silent`, and `--shell` are also completed where appropriate.
 
 Syntax:
 
 ```text
-istioctl-env autocompletion
+istioctl-env autocompletion [--shell <bash|zsh|fish>]
 ```
 
 Options/flags:
+
+- `--shell <name>`: emit the completion script for the named shell. When
+  omitted, `istioctl-env` auto-detects the shell from `$SHELL`. If detection
+  fails, it falls back to `bash` and prints a `WARN` to stderr.
 - `-h`, `--help`: show command help and exit
 
-Environment variables: none.
+Environment variables:
+
+- `SHELL` (read for auto-detection)
 
 Exit codes:
 - `0` on success.
+- `1` if `--shell` has an unknown value.
 
 Example:
 
 ```sh
-# Enable autocompletion for the current session
-source <(istioctl-env autocompletion)
+# Bash — enable for the current session or persist in ~/.bashrc
+source <(istioctl-env autocompletion --shell bash)
 
-# Enable autocompletion permanently
-echo 'source <(istioctl-env autocompletion)' >> ~/.bashrc
+# Zsh — compinit must have run first (usually via your framework)
+autoload -Uz compinit && compinit
+source <(istioctl-env autocompletion --shell zsh)
+
+# Fish — one-time install
+istioctl-env autocompletion --shell fish > ~/.config/fish/completions/istioctl-env.fish
 ```

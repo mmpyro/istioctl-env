@@ -15,7 +15,7 @@ If your platform is not listed, install from source.
 
 ## Prerequisites
 
-- A POSIX-like shell (e.g. `bash` or `zsh`).
+- A supported shell (`bash`, `zsh`, or `fish`). The POSIX shim itself works in any `/bin/sh`-compatible shell; the `istioctl-env` shell integration is first-class for the three listed shells.
 - Permission to create and write files in your chosen `ISTIOENV_ROOT` directory.
 - Network access to GitHub:
   - `istioctl-env install`, `istioctl-env latest`, and `istioctl-env list-remote` fetch information from GitHub.
@@ -73,16 +73,44 @@ Required permissions:
 
 ### 2) Initialize shell integration
 
-Add this after the `ISTIOENV_ROOT` export.
-Add this to your shell profile (e.g. `~/.bashrc` or `~/.zshrc`):
+Add this after the `ISTIOENV_ROOT` export. `istioctl-env init` auto-detects
+your shell from `$SHELL` and prints the matching integration code; you can
+also force a specific shell with `--shell <bash|zsh|fish>`.
+
+#### Bash (`~/.bashrc`)
+
 ```sh
 eval "$(istioctl-env init)"
+# or, to be explicit:
+eval "$(istioctl-env init --shell bash)"
+```
+
+#### Zsh (`~/.zshrc`)
+
+```sh
+eval "$(istioctl-env init --shell zsh)"
+```
+
+#### Fish (`~/.config/fish/config.fish`)
+
+```fish
+istioctl-env init --shell fish | source
 ```
 
 What this does:
 
 - Prepends `$ISTIOENV_ROOT/shims` to your `PATH` so `istioctl` resolves to the shim.
 - Defines an `istioctl-env` shell function that enables `istioctl-env shell` to affect the current shell environment.
+
+If `istioctl-env` cannot detect your shell (for example in a non-interactive
+environment where `$SHELL` is unset), it falls back to the bash integration
+and prints a `WARN` to stderr suggesting that you pass `--shell` explicitly.
+
+Shell completion follows the same pattern. The zsh script uses `_arguments`
+with per-subcommand descriptions and completes **remote** versions (served
+from the on-disk release cache) for `istioctl-env install <TAB>`, while
+`uninstall`, `shell`, `local`, `global`, and `exec` complete against
+installed versions. See [CLI reference / autocompletion](cli-reference.md#autocompletion).
 
 ### 3) Install an `istioctl` version
 
