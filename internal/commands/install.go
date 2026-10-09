@@ -38,6 +38,15 @@ func installWithClient(client *github.Client, version string, silent bool) error
 		return err
 	}
 
+	// When no version is specified, resolution falls back to "latest" (or
+	// the nearest .istioctl-version). Latest resolution needs the GitHub
+	// API, so bail out early with a clear message when running offline
+	// rather than letting the fallback silently install the hardcoded
+	// baseline version.
+	if strings.TrimSpace(version) == "" && github.IsOffline() {
+		return fmt.Errorf("cannot determine latest version while ISTIOENV_OFFLINE=1; please specify a version explicitly")
+	}
+
 	resolved, raw, err := resolveSpecForInstall(client, version)
 	if err != nil {
 		return err

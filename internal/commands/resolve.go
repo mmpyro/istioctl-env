@@ -52,17 +52,26 @@ func resolveWithClient(client *github.Client, install bool, silent bool) error {
 	}
 
 	// Route installer progress output to stderr so stdout stays clean.
-	var restore func()
+	// restoreOnce ensures the stdout swap is undone exactly once, whether
+	// via the explicit call below (so the resolved version prints to the
+	// real stdout) or via the deferred safety net on an early error return.
+	var (
+		restore     func()
+		restoreOnce bool
+	)
+	restoreStdout := func() {
+		if restore != nil && !restoreOnce {
+			restoreOnce = true
+			restore()
+		}
+	}
 	if install {
 		restore = redirectStdoutToStderr()
-		defer restore()
+		defer restoreStdout()
 	}
 
 	resolved, _, err := resolveSpecForShim(client, install, silent)
-	if restore != nil {
-		restore()
-		restore = nil
-	}
+	restoreStdout()
 	if err != nil {
 		return err
 	}

@@ -52,30 +52,43 @@ func Status() error {
 
 	versionsDir := filepath.Join(root, "versions")
 	entries, err := os.ReadDir(versionsDir)
-	if err == nil {
-		var installed []string
-		for _, entry := range entries {
-			if entry.IsDir() {
-				installed = append(installed, entry.Name())
-			}
-		}
-		installed = semver.SortDescending(installed)
-		fmt.Printf("\nInstalled versions (%d):\n", len(installed))
-		activeConcrete := resolvedVersion
-		if activeConcrete == "" {
-			activeConcrete = rawVersion
-		}
-		for _, v := range installed {
-			if v == activeConcrete {
-				fmt.Printf("\t* %s\n", v)
-			} else {
-				fmt.Printf("\t  %s\n", v)
-			}
-		}
-	} else {
+	if err != nil {
 		fmt.Println("\nInstalled versions: none")
+		return nil
 	}
 
+	var installed []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			installed = append(installed, entry.Name())
+		}
+	}
+	installed = semver.SortDescending(installed)
+	fmt.Printf("\nInstalled versions (%d):\n", len(installed))
+
+	activeConcrete := resolvedVersion
+	if activeConcrete == "" {
+		activeConcrete = rawVersion
+	}
+
+	// Compute total disk usage alongside the listing.  A size failure on a
+	// single version is best-effort: we skip the broken directory and keep
+	// going so `status` is never prevented from reporting the environment.
+	var totalBytes int64
+	for _, v := range installed {
+		marker := "  "
+		if v == activeConcrete {
+			marker = "* "
+		}
+		if size, sizeErr := dirSize(filepath.Join(versionsDir, v)); sizeErr == nil {
+			totalBytes += size
+			fmt.Printf("\t%s%s (%s)\n", marker, v, humanize(size))
+		} else {
+			fmt.Printf("\t%s%s\n", marker, v)
+		}
+	}
+
+	fmt.Printf("\nTotal disk usage: %s\n", humanize(totalBytes))
 	return nil
 }
 

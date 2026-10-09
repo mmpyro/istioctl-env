@@ -56,3 +56,15 @@ The cache file (`releases.json`) stores:
 ## 4. Maintenance
 
 The hardcoded baseline should be updated periodically (e.g., when releasing a new version of `istioctl-env`) to keep the "lower bound" reasonably close to the current state of the world. However, the system is designed to correct itself automatically via delta fetches even if the baseline is significantly out of date.
+
+---
+
+## 5. Offline mode
+
+When `ISTIOENV_OFFLINE=1` is set, the caching strategy changes to keep `istioctl-env` fully functional without any network access:
+
+* **Layer 1 (fresh disk cache)** is still consulted first — if a non-expired `releases.json` exists it is used verbatim.
+* **Layer 2 (delta fetch)** is **skipped entirely**. The code does not even attempt the GitHub API call, so no error-path warning is printed to `stderr`.
+* **Layer 3 (fallback)** behaves as before: a stale cache (ignoring TTL) is preferred over the hardcoded baseline.
+
+The practical effect is that `list-remote` and `latest` always return results and never warn about network failures while offline. If `ISTIOENV_OFFLINE=1` is combined with `ISTIOENV_DOWNLOAD_MIRROR` (and, optionally, `ISTIOENV_API_MIRROR` for `upgrade`), `install <version>` can also run with no public-internet access — the download mirror serves both the archive and the per-file `.sha256` from the same relative path as GitHub. The legacy `ISTIOENV_MIRROR_URL` is still accepted as an alias for `ISTIOENV_DOWNLOAD_MIRROR`. See [installation and configuration](installation-and-configuration.md) for the full set of environment variables and matching CLI flags.

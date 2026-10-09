@@ -33,6 +33,17 @@ func getRemoteVersions(client *github.Client) (stable []string, prerelease []str
 		return freshStable, freshPre, nil
 	}
 
+	// ── Offline mode: skip the delta fetch entirely ──────────────────────
+	// Prefer a stale cache if we have one, otherwise fall back to the
+	// hardcoded baseline. No warning is printed in this branch because the
+	// absence of a fresh fetch is expected and desired.
+	if github.IsOffline() {
+		if staleStable, stalePre, hasStale := loadStaleCache(c); hasStale {
+			return staleStable, stalePre, nil
+		}
+		return cache.BaselineVersions(), cache.BaselinePrereleaseVersions(), nil
+	}
+
 	// ── Layer 2: delta fetch ──────────────────────────────────────────────
 	// Read the stale cache (ignoring TTL) so we can use it as the merge base
 	// and as the anchor for the delta fetch.  If no stale cache exists we fall

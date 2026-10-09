@@ -129,6 +129,7 @@ Full reference: [docs/cli-reference.md](docs/cli-reference.md)
 |---------|-------------|
 | `istioctl-env help` | Display help and all available commands |
 | `istioctl-env list` | List all installed versions |
+| `istioctl-env list --disk-usage` | List installed versions with on-disk size and a TOTAL row |
 | `istioctl-env list-remote` | List all available istioctl versions from GitHub |
 | `istioctl-env list-remote --prerelease` | Include pre-release istioctl versions |
 | `istioctl-env latest` | Print the latest available version of istioctl from GitHub |
@@ -136,6 +137,7 @@ Full reference: [docs/cli-reference.md](docs/cli-reference.md)
 | `istioctl-env status` | Show current environment status |
 | `istioctl-env install [VERSION]` | Install a specific version (or latest) |
 | `istioctl-env uninstall VERSION` | Uninstall a specific version |
+| `istioctl-env prune` | Dry-run removal of unreferenced versions (use `--yes` to apply) |
 | `istioctl-env exec VERSION CMD` | Run a command using a specific istioctl version |
 | `istioctl-env shell [VERSION]` | Set/show shell version (`ISTIOENV_VERSION`) |
 | `istioctl-env local [VERSION]` | Set/show local version (`.istioctl-version`) |
@@ -144,6 +146,19 @@ Full reference: [docs/cli-reference.md](docs/cli-reference.md)
 | `istioctl-env doctor [--fix] [--deep]` | Diagnose the environment and print OK/WARN/FAIL per check (optionally auto-repair; `--deep` also re-verifies installed binaries against GitHub checksums) |
 | `istioctl-env resolve [--install]` | Resolve the active expression to a concrete version |
 | `istioctl-env version` | Print istioctl-env version |
+
+### Global flags
+
+Every command accepts the following top-level flags (equivalent env vars shown in parentheses). They may appear before or after the subcommand.
+
+| Flag | Env var | Purpose |
+|------|---------|---------|
+| `--offline` | `ISTIOENV_OFFLINE=1` | Never contact the network. `list-remote`/`latest` serve from cache/baseline; `install` fails fast with a clear message. |
+| `--github-token <token>` | `ISTIOENV_GITHUB_TOKEN` (fallback: `GITHUB_TOKEN`) | GitHub token used for API requests and same-origin asset downloads (5 000/hr instead of 60/hr/IP). |
+| `--api-mirror <url>` | `ISTIOENV_API_MIRROR` | Override `api.github.com` (point at an internal mirror). |
+| `--download-mirror <url>` | `ISTIOENV_DOWNLOAD_MIRROR` (legacy alias: `ISTIOENV_MIRROR_URL`) | Override `github.com` for release-asset downloads. |
+
+See [docs/installation-and-configuration.md](docs/installation-and-configuration.md#environment-variables) for full details.
 
 ## Version Priority
 

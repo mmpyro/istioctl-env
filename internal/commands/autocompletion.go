@@ -35,7 +35,7 @@ func AutocompletionBash() string {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    opts="help list list-remote init install uninstall shell local global latest which exec resolve status upgrade doctor version"
+    opts="help list list-remote init install uninstall prune shell local global latest which exec resolve status upgrade doctor version"
 
     if [[ ${COMP_CWORD} -eq 1 ]] ; then
         COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -84,6 +84,7 @@ _istioctl-env() {
                 'latest:Print the latest available version'
                 'install:Install a specific version (or latest)'
                 'uninstall:Uninstall a specific version'
+                'prune:Remove unused installed versions'
                 'shell:Set or show the shell version'
                 'local:Set or show the local version'
                 'global:Set or show the global version'
@@ -175,6 +176,7 @@ complete -c istioctl-env -n '__fish_use_subcommand' -a 'list-remote' -d 'List av
 complete -c istioctl-env -n '__fish_use_subcommand' -a 'init' -d 'Initialize istioctl-env setup'
 complete -c istioctl-env -n '__fish_use_subcommand' -a 'install' -d 'Install a specific version (or latest)'
 complete -c istioctl-env -n '__fish_use_subcommand' -a 'uninstall' -d 'Uninstall a specific version'
+complete -c istioctl-env -n '__fish_use_subcommand' -a 'prune' -d 'Remove unused installed versions'
 complete -c istioctl-env -n '__fish_use_subcommand' -a 'shell' -d 'Set or show the shell version'
 complete -c istioctl-env -n '__fish_use_subcommand' -a 'local' -d 'Set or show the local version'
 complete -c istioctl-env -n '__fish_use_subcommand' -a 'global' -d 'Set or show the global version'

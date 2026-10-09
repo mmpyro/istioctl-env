@@ -209,3 +209,89 @@ Fixes:
 
 - Wait and retry later.
 - If running in CI or heavily automated use, consider reducing frequency of `list-remote` / `latest` calls.
+- Provide a GitHub token to raise the rate limit — see "GitHub authentication" below.
+
+## Environment variables
+
+The following environment variables influence authentication, networking, and artifact resolution. All are optional. Each one has a matching global CLI flag (see the [CLI reference](cli-reference.md#global-flags)); env vars and flags are interchangeable.
+
+| Variable | Flag | Purpose | Default |
+|----------|------|---------|---------|
+| `ISTIOENV_GITHUB_TOKEN` | `--github-token` | Preferred GitHub token. Sent as `Authorization: Bearer …` on API requests and on same-origin release-asset downloads. Stripped automatically on cross-origin redirects (e.g. the S3 CDN GitHub 302s to). | unset |
+| `GITHUB_TOKEN` | — | Fallback token used when `ISTIOENV_GITHUB_TOKEN` is empty. | unset |
+| `ISTIOENV_OFFLINE` | `--offline` | Set to `1` / `true` / `yes` / `on` to disable all outbound HTTP. | unset |
+| `ISTIOENV_API_MIRROR` | `--api-mirror` | Base URL that replaces `https://api.github.com`. The mirror must speak the GitHub REST API. | unset |
+| `ISTIOENV_DOWNLOAD_MIRROR` | `--download-mirror` | Base URL that replaces `https://github.com` when building release-asset URLs. The API host is unaffected. | unset |
+| `ISTIOENV_MIRROR_URL` | — | **Deprecated** alias of `ISTIOENV_DOWNLOAD_MIRROR`. Kept for backward compatibility; use the new name in new deployments. | unset |
+
+### GitHub authentication
+
+`istioctl-env` reads `ISTIOENV_GITHUB_TOKEN` first, then falls back to `GITHUB_TOKEN`. When a token is present, every outgoing GitHub API request includes:
+
+```
+Authorization: Bearer <token>
+X-GitHub-Api-Version: 2022-11-28
+```
+
+Release-asset downloads also carry the token, but only on the **initial, same-origin** request — i.e. only when the download URL host matches the configured download base (`github.com` by default, or your `ISTIOENV_DOWNLOAD_MIRROR` host). The HTTP client's redirect handler strips `Authorization` on any cross-origin hop, so the token can never leak to GitHub's object CDN (`objects.githubusercontent.com`) or to a third-party host your mirror redirects to.
+
+Typical uses:
+
+- Avoid the 60-request/hour anonymous rate limit (5 000/hr authenticated) when running `list-remote`, `latest`, or `install` frequently (e.g. in CI, or behind a corporate NAT that shares an IP across users).
+- Download assets from a private `istio/istio` fork or an authenticated internal mirror.
+
+```sh
+export ISTIOENV_GITHUB_TOKEN="ghp_…"
+# or, per-invocation:
+istioctl-env --github-token "$CI_GITHUB_TOKEN" install 1.24.0
+```
+
+### Offline mode
+
+Set `ISTIOENV_OFFLINE=1` (or pass `--offline`) to prevent `istioctl-env` from making any outbound HTTP calls.
+
+Behavior:
+
+- `list-remote`, `latest` — served from the on-disk cache; if no cache exists, the hardcoded baseline is used. No warning is printed because the fallback is intentional. See [caching](caching.md#5-offline-mode).
+- `install <version>` with an explicit version — proceeds to the download step. If `ISTIOENV_DOWNLOAD_MIRROR` is set the mirror is used; otherwise the download fails fast with a clear error pointing you at `ISTIOENV_DOWNLOAD_MIRROR` (no 30-second connect timeout).
+- `install` (no version) — refuses to run with `cannot determine latest version while ISTIOENV_OFFLINE=1`.
+- `upgrade` — exits cleanly with `istioctl-env: offline mode (ISTIOENV_OFFLINE=1); skipping upgrade` and exit code `0`.
+
+```sh
+export ISTIOENV_OFFLINE=1
+istioctl-env install 1.24.0           # works if ISTIOENV_DOWNLOAD_MIRROR is set
+istioctl-env list-remote              # works, served from cache / baseline
+istioctl-env upgrade                  # no-op, exit 0
+```
+
+### Custom mirrors
+
+Two independent env vars (and matching flags) let you redirect either host:
+
+- **`ISTIOENV_API_MIRROR`** — replaces `https://api.github.com`. Use it when your runners can't reach the public GitHub API (regulated environments, air-gapped networks with an API proxy). The mirror must serve the GitHub REST API routes `istioctl-env` uses:
+  - `GET /repos/istio/istio/releases`
+  - `GET /repos/istio/istio/releases/latest`
+  - `GET /repos/<owner>/istioctl-env/releases/latest` (only for `istioctl-env upgrade`)
+- **`ISTIOENV_DOWNLOAD_MIRROR`** — replaces `https://github.com` when building release-asset URLs. The mirror MUST serve the per-file `.sha256` checksum at the same relative path as GitHub releases — `istioctl-env` downloads it using `<archive-url>.sha256` and refuses the install on mismatch.
+
+Trailing slashes on both values are stripped automatically.
+
+Example (both configured):
+
+```sh
+export ISTIOENV_API_MIRROR="https://ghapi.corp.example"
+export ISTIOENV_DOWNLOAD_MIRROR="https://mirror.corp.example/istio"
+istioctl-env install 1.24.0
+```
+
+The download URL above becomes:
+
+```
+https://mirror.corp.example/istio/istio/istio/releases/download/1.24.0/istioctl-1.24.0-<os>-<arch>.tar.gz
+```
+
+Combining both mirrors with `ISTIOENV_OFFLINE=1` enables fully air-gapped installs: `istioctl-env` will never contact public GitHub, and all archive, checksum, and API traffic flows through your internal mirrors.
+
+#### Legacy `ISTIOENV_MIRROR_URL`
+
+Earlier versions exposed a single `ISTIOENV_MIRROR_URL` env var that only overrode the download host. It is still accepted and still only affects downloads, but new deployments should prefer `ISTIOENV_DOWNLOAD_MIRROR` (and `ISTIOENV_API_MIRROR` for the API host). If both are set, `ISTIOENV_DOWNLOAD_MIRROR` wins.

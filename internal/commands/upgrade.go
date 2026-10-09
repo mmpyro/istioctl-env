@@ -16,6 +16,14 @@ const istioenvRepo = "mmpyro/istioctl-env"
 // Upgrade downloads the latest stable istioctl-env release from GitHub and replaces
 // the current binary in-place using an atomic rename.
 func Upgrade() error {
+	// 0. Short-circuit in offline mode: upgrading istioctl-env itself always
+	//    needs the GitHub API and the GitHub release assets, so there is no
+	//    sensible fallback. Exit cleanly with a status message.
+	if github.IsOffline() {
+		fmt.Println("istioctl-env: offline mode (ISTIOENV_OFFLINE=1); skipping upgrade")
+		return nil
+	}
+
 	// 1. Resolve the running binary path.
 	execPath, err := os.Executable()
 	if err != nil {
@@ -57,8 +65,12 @@ func Upgrade() error {
 		return fmt.Errorf("failed to detect platform: %w", err)
 	}
 
-	// 5. Build the asset download URL.
-	url := platform.SelfDownloadURL(latestVersion, info, istioenvRepo)
+	// 5. Build the asset download URL. We route through the client's
+	//    DownloadBaseURL so an ISTIOENV_DOWNLOAD_MIRROR (or legacy
+	//    ISTIOENV_MIRROR_URL) also redirects self-upgrade downloads to
+	//    the mirror — in a fully air-gapped environment that is the
+	//    only way `istioctl-env upgrade` can succeed.
+	url := platform.SelfDownloadURL(client.DownloadBaseURL, latestVersion, info, istioenvRepo)
 	fmt.Printf("Downloading istioctl-env %s for %s/%s...\n", latestVersion, info.OS, info.Arch)
 
 	// 6. Download the new binary.

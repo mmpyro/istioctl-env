@@ -11,10 +11,28 @@ Conventions:
 ## Global usage
 
 ```text
-istioctl-env <command> [arguments]
+istioctl-env [global flags] <command> [arguments]
 ```
 
 Top-level help is available via `istioctl-env help`, `istioctl-env --help`, or `istioctl-env -h`.
+
+## Global flags
+
+These flags affect authentication, offline behavior, and host resolution. They may appear before or after the subcommand; each is a transient override for the matching environment variable listed in [Environment variables](installation-and-configuration.md#environment-variables). A `--` sentinel ends global-flag parsing (useful for `istioctl-env exec`).
+
+| Flag | Env var | Meaning |
+|------|---------|---------|
+| `--offline` | `ISTIOENV_OFFLINE=1` | Disable all outbound HTTP. `list-remote` / `latest` serve from cache / baseline; `install` without an explicit version fails fast; `upgrade` is a no-op. |
+| `--github-token <token>` | `ISTIOENV_GITHUB_TOKEN` | GitHub token used for both API requests and same-origin release-asset downloads. Stripped on cross-origin redirects. |
+| `--api-mirror <url>` | `ISTIOENV_API_MIRROR` | Replace `https://api.github.com`. Mirror must speak the GitHub REST API. |
+| `--download-mirror <url>` | `ISTIOENV_DOWNLOAD_MIRROR` | Replace `https://github.com` for release-asset URLs. Mirror must also serve `<asset>.sha256`. |
+
+Both `--flag value` and `--flag=value` forms are accepted. If a flag and its matching env var are both set, the flag wins (because it sets the env var for the current process before the command runs).
+
+```sh
+istioctl-env --github-token "$GH_TOKEN" --api-mirror https://ghapi.corp install 1.24.0
+istioctl-env --offline list-remote
+```
 
 ## Environment variables
 
@@ -169,10 +187,13 @@ Purpose: List installed `istioctl` versions (newest to oldest).
 Syntax:
 
 ```text
-istioctl-env list
+istioctl-env list [flags]
 ```
 
-Options/flags: none.
+Options/flags:
+
+- `--disk-usage`: also print the on-disk size of each version and a `TOTAL` row (useful before `prune`).
+- `-h`, `--help`: show command help and exit.
 
 Environment variables:
 
@@ -187,6 +208,7 @@ Example:
 
 ```sh
 istioctl-env list
+istioctl-env list --disk-usage
 ```
 
 ---
@@ -333,6 +355,73 @@ Example:
 
 ```sh
 istioctl-env uninstall 1.24.0
+```
+
+---
+
+### `prune`
+
+Purpose: Remove installed `istioctl` versions that are not referenced by any configured source. A version is considered **referenced** when it matches any of:
+
+- the global version (`$ISTIOENV_ROOT/version`), or
+- the currently exported `ISTIOENV_VERSION`, or
+- the version named in any `.istioctl-version` file found under a configured scan root.
+
+Scan roots default to `$HOME` and can be overridden with the environment variable `ISTIOENV_PRUNE_SCAN_ROOTS` (OS path list separator, e.g. `:`-separated on Unix). Setting `ISTIOENV_PRUNE_SCAN_ROOTS=""` explicitly disables filesystem scanning — useful on CI runners that only want the env-var and global guards.
+
+The command is **non-destructive by default**: without `--yes`, it reports what *would* be removed and exits successfully without touching the filesystem.
+
+The reference-discovery walk skips well-known noisy directories (`.git`, `node_modules`, `vendor`, `.cache`, `.gradle`, `.m2`, `.venv`, `__pycache__`, `.terraform`, `.idea`, `.vscode`, `.tox`, `dist`, `target`, `build`, `Library`) and never follows symbolic links. It also refuses to descend into `$ISTIOENV_ROOT`.
+
+Syntax:
+
+```text
+istioctl-env prune [flags]
+```
+
+Options/flags:
+
+- `--keep-last N`: also keep the N newest installed versions, regardless of whether they are referenced (default `0`).
+- `--older-than DUR`: only remove versions whose directory mtime is older than `DUR`. Accepts Go duration syntax (`30m`, `24h`) plus the shorthand units `d` (days) and `w` (weeks), e.g. `30d`, `12w`, `1w3d`.
+- `--dry-run`: report what would be removed; do not delete anything. This is the **default**.
+- `--yes`: actually remove the selected versions. When combined with `--dry-run`, `--dry-run` wins (safer default).
+- `-h`, `--help`: show command help and exit.
+
+Environment variables:
+
+- `ISTIOENV_ROOT` (required)
+- `ISTIOENV_VERSION` (optional; when set, that version is referenced)
+- `ISTIOENV_PRUNE_SCAN_ROOTS` (optional; path-list of filesystem roots to scan for `.istioctl-version` files; default `$HOME`)
+
+Exit codes:
+
+- `0` on success — including when there is nothing to prune, and when running in dry-run mode.
+- `1` if `istioctl-env` is not initialized, the versions directory cannot be read, or a destructive removal fails.
+
+Output:
+
+Every invocation prints a one-line scan summary of the form:
+
+```
+scanned <N> files in <duration> under <root> — found <M> .istioctl-version file(s)
+```
+
+Followed by `would remove ...` lines (dry-run) or `removed ...` lines (`--yes`), and a final summary with the total bytes that would be / were freed. Dry-run mode additionally prints a `keeping:` block explaining why each surviving version was retained.
+
+Example:
+
+```sh
+# Preview — safe, prints a plan.
+istioctl-env prune
+
+# Keep the two newest versions in addition to anything referenced.
+istioctl-env prune --keep-last 2
+
+# Only remove installs older than three months, and actually delete them.
+istioctl-env prune --older-than 90d --yes
+
+# Scan multiple source trees instead of all of $HOME.
+ISTIOENV_PRUNE_SCAN_ROOTS="$HOME/code:$HOME/work" istioctl-env prune --yes
 ```
 
 ---
