@@ -2,14 +2,20 @@ package commands
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/user/istioctl-env/internal/github"
 	"github.com/user/istioctl-env/internal/shim"
 )
 
@@ -287,7 +293,7 @@ func TestCheckResolvedVersion(t *testing.T) {
 		}
 	})
 
-	t.Run("ok when shell version set", func(t *testing.T) {
+	t.Run("ok when shell version set and reports source", func(t *testing.T) {
 		isolateEnv(t)
 		t.Setenv("ISTIOENV_VERSION", "1.24.0")
 		res, v := checkResolvedVersion()
@@ -297,7 +303,109 @@ func TestCheckResolvedVersion(t *testing.T) {
 		if v != "1.24.0" {
 			t.Fatalf("expected 1.24.0, got %q", v)
 		}
+		if !strings.Contains(res.Detail, "set by ISTIOENV_VERSION") {
+			t.Fatalf("expected detail to report env-var source, got %q", res.Detail)
+		}
 	})
+
+	t.Run("ok when local .istioctl-version file wins and detail says so", func(t *testing.T) {
+		isolateEnv(t)
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, ".istioctl-version"), []byte("1.23.0\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Chdir(dir)
+		res, v := checkResolvedVersion()
+		if res.Status != statusOK {
+			t.Fatalf("expected OK, got %s (%s)", res.Status, res.Detail)
+		}
+		if v != "1.23.0" {
+			t.Fatalf("expected 1.23.0, got %q", v)
+		}
+		if !strings.Contains(res.Detail, ".istioctl-version file") {
+			t.Fatalf("expected detail to report local-file source, got %q", res.Detail)
+		}
+	})
+
+	t.Run("ok when global file wins and detail says so", func(t *testing.T) {
+		isolateEnv(t)
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, "versions"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "version"), []byte("1.22.0\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("ISTIOENV_ROOT", root)
+		// Walk starts in a tempdir that has no .istioctl-version anywhere up the tree.
+		t.Chdir(t.TempDir())
+		res, v := checkResolvedVersion()
+		if res.Status != statusOK {
+			t.Fatalf("expected OK, got %s (%s)", res.Status, res.Detail)
+		}
+		if v != "1.22.0" {
+			t.Fatalf("expected 1.22.0, got %q", v)
+		}
+		if !strings.Contains(res.Detail, "global version file") {
+			t.Fatalf("expected detail to report global-file source, got %q", res.Detail)
+		}
+	})
+}
+
+func TestCheckDanglingVersions(t *testing.T) {
+	t.Run("ok when no versions installed", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, "versions"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		res := checkDanglingVersions(root)
+		if res.Status != statusOK {
+			t.Fatalf("expected OK, got %s (%s)", res.Status, res.Detail)
+		}
+	})
+
+	t.Run("ok when every version has a binary", func(t *testing.T) {
+		root := t.TempDir()
+		installVersion(t, root, "1.24.0", 0o755)
+		installVersion(t, root, "1.25.0", 0o644)
+		res := checkDanglingVersions(root)
+		if res.Status != statusOK {
+			t.Fatalf("expected OK (non-exec is not dangling), got %s (%s)", res.Status, res.Detail)
+		}
+	})
+
+	t.Run("warns when a version dir has no binary", func(t *testing.T) {
+		root := t.TempDir()
+		installVersion(t, root, "1.24.0", 0o755)
+		// Create an empty version dir with no istioctl inside.
+		if err := os.MkdirAll(filepath.Join(root, "versions", "1.99.0"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		res := checkDanglingVersions(root)
+		if res.Status != statusWARN {
+			t.Fatalf("expected WARN, got %s (%s)", res.Status, res.Detail)
+		}
+		if !strings.Contains(res.Detail, "1.99.0") {
+			t.Fatalf("expected detail to mention dangling version, got %q", res.Detail)
+		}
+		if strings.Contains(res.Detail, "1.24.0") {
+			t.Fatalf("healthy version should not appear in dangling list, got %q", res.Detail)
+		}
+	})
+}
+
+func TestCheckInstalledBinaries_SeparatesDangling(t *testing.T) {
+	// A dangling version dir (no istioctl at all) must NOT be reported by
+	// checkInstalledBinaries — it belongs to checkDanglingVersions.
+	root := t.TempDir()
+	installVersion(t, root, "1.24.0", 0o755)
+	if err := os.MkdirAll(filepath.Join(root, "versions", "1.99.0"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res := checkInstalledBinaries(root)
+	if res.Status != statusOK {
+		t.Fatalf("expected OK (dangling handled elsewhere), got %s (%s)", res.Status, res.Detail)
+	}
 }
 
 func TestCheckActiveBinary(t *testing.T) {
@@ -378,15 +486,43 @@ func TestCheckInstalledBinaries(t *testing.T) {
 }
 
 func TestCheckGitHub(t *testing.T) {
-	t.Run("ok on success", func(t *testing.T) {
-		res := checkGitHub(func() error { return nil })
+	t.Run("ok on success without rate-limit headers", func(t *testing.T) {
+		res := checkGitHub(func() ghStatus { return ghStatus{} })
 		if res.Status != statusOK {
 			t.Fatalf("expected OK, got %s", res.Status)
 		}
 	})
 
+	t.Run("ok with healthy rate-limit headroom", func(t *testing.T) {
+		res := checkGitHub(func() ghStatus {
+			return ghStatus{RateLimit: 60, RateRemaining: 42}
+		})
+		if res.Status != statusOK {
+			t.Fatalf("expected OK, got %s (%s)", res.Status, res.Detail)
+		}
+		if !strings.Contains(res.Detail, "42/60") {
+			t.Fatalf("expected detail to show headroom, got %q", res.Detail)
+		}
+	})
+
+	t.Run("warns when rate-limit remaining is low", func(t *testing.T) {
+		reset := time.Date(2026, 10, 9, 10, 0, 0, 0, time.UTC)
+		res := checkGitHub(func() ghStatus {
+			return ghStatus{RateLimit: 60, RateRemaining: 3, RateReset: reset}
+		})
+		if res.Status != statusWARN {
+			t.Fatalf("expected WARN, got %s (%s)", res.Status, res.Detail)
+		}
+		if !strings.Contains(res.Detail, "3/60") {
+			t.Fatalf("expected detail to mention headroom, got %q", res.Detail)
+		}
+		if !strings.Contains(res.Detail, "GITHUB_TOKEN") {
+			t.Fatalf("expected remediation hint, got %q", res.Detail)
+		}
+	})
+
 	t.Run("warns on failure", func(t *testing.T) {
-		res := checkGitHub(func() error { return errors.New("timeout") })
+		res := checkGitHub(func() ghStatus { return ghStatus{Err: errors.New("timeout")} })
 		if res.Status != statusWARN {
 			t.Fatalf("expected WARN, got %s", res.Status)
 		}
@@ -448,12 +584,20 @@ func TestCheckCache(t *testing.T) {
 // End-to-end runDoctor tests
 // ---------------------------------------------------------------------------
 
+// stubPing is a reusable no-network pinger that reports OK.
+func stubPing() ghStatus { return ghStatus{} }
+
+// stubDeepOK is a reusable no-network deep checker that reports OK.
+func stubDeepOK(_ string) checkResult {
+	return checkResult{Status: statusOK, Name: "Deep checksums", Detail: "stub"}
+}
+
 func TestRunDoctor_Uninitialized(t *testing.T) {
 	isolateEnv(t)
 	t.Chdir(t.TempDir())
 
 	var buf bytes.Buffer
-	err := runDoctor(false, func() error { return nil }, &buf)
+	err := runDoctor(false, false, stubPing, stubDeepOK, &buf)
 	if err == nil {
 		t.Fatal("expected error because ISTIOENV_ROOT is unset")
 	}
@@ -483,7 +627,7 @@ func TestRunDoctor_HealthyEnvironment(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	var buf bytes.Buffer
-	err := runDoctor(false, func() error { return nil }, &buf)
+	err := runDoctor(false, false, stubPing, stubDeepOK, &buf)
 	if err != nil {
 		t.Fatalf("expected no error in healthy env, got %v\n%s", err, buf.String())
 	}
@@ -510,14 +654,14 @@ func TestRunDoctor_FixRegeneratesShim(t *testing.T) {
 
 	// Without --fix, drift is reported.
 	var preBuf bytes.Buffer
-	_ = runDoctor(false, func() error { return nil }, &preBuf)
+	_ = runDoctor(false, false, stubPing, stubDeepOK, &preBuf)
 	if !strings.Contains(preBuf.String(), "[WARN]") {
 		t.Fatalf("expected WARN before fix, got:\n%s", preBuf.String())
 	}
 
 	// With --fix, drift is resolved and the binary is chmod'd.
 	var buf bytes.Buffer
-	if err := runDoctor(true, func() error { return nil }, &buf); err != nil {
+	if err := runDoctor(true, false, stubPing, stubDeepOK, &buf); err != nil {
 		t.Fatalf("unexpected error after --fix: %v\n%s", err, buf.String())
 	}
 	expected, err := expectedShimContent(root)
@@ -554,7 +698,7 @@ func TestDoctor_PublicWrapperExits(t *testing.T) {
 	isolateEnv(t)
 	t.Chdir(t.TempDir())
 	out := captureStdout(t, func() {
-		if err := Doctor(false); err == nil {
+		if err := Doctor(false, false); err == nil {
 			t.Fatal("expected error from Doctor() with unset env")
 		}
 	})
@@ -565,4 +709,219 @@ func TestDoctor_PublicWrapperExits(t *testing.T) {
 
 // pingerExample is a simple compile-time sanity check that the pinger type
 // matches the expected signature; this doubles as a stand-in test helper.
-var _ pinger = func() error { return fmt.Errorf("stub") }
+var _ pinger = func() ghStatus { return ghStatus{Err: fmt.Errorf("stub")} }
+
+// deepCheckerExample is the equivalent compile-time check for deepChecker.
+var _ deepChecker = func(string) checkResult { return checkResult{} }
+
+// ---------------------------------------------------------------------------
+// Deep (--deep) check tests
+// ---------------------------------------------------------------------------
+
+func TestRunDeepCheck(t *testing.T) {
+	t.Run("ok when installed binary matches freshly downloaded archive", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, "versions"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		// Build a tar.gz containing a known istioctl payload, install the
+		// same bytes on disk, and have the stub server return that archive.
+		payload := []byte("installed istioctl binary content")
+		archive := createTestTarGz(t, "istioctl", payload)
+		archiveSum := sha256.Sum256(archive)
+		archiveSumHex := hex.EncodeToString(archiveSum[:])
+
+		installDir := filepath.Join(root, "versions", "1.24.0")
+		if err := os.MkdirAll(installDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(installDir, "istioctl"), payload, 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, ".sha256") {
+				fmt.Fprint(w, archiveSumHex)
+				return
+			}
+			_, _ = w.Write(archive)
+		}))
+		defer server.Close()
+
+		client := &github.Client{
+			BaseURL:         server.URL,
+			DownloadBaseURL: server.URL,
+			HTTPClient:      server.Client(),
+		}
+
+		res := runDeepCheck(client, root)
+		if res.Status != statusOK {
+			t.Fatalf("expected OK, got %s (%s)", res.Status, res.Detail)
+		}
+		if !strings.Contains(res.Detail, "1") {
+			t.Fatalf("expected count in detail, got %q", res.Detail)
+		}
+	})
+
+	t.Run("fails when installed binary differs from GitHub release", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, "versions"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		freshPayload := []byte("genuine istioctl content")
+		tamperedPayload := []byte("TAMPERED CONTENT")
+		archive := createTestTarGz(t, "istioctl", freshPayload)
+		archiveSum := sha256.Sum256(archive)
+		archiveSumHex := hex.EncodeToString(archiveSum[:])
+
+		installDir := filepath.Join(root, "versions", "1.24.0")
+		if err := os.MkdirAll(installDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(installDir, "istioctl"), tamperedPayload, 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, ".sha256") {
+				fmt.Fprint(w, archiveSumHex)
+				return
+			}
+			_, _ = w.Write(archive)
+		}))
+		defer server.Close()
+
+		client := &github.Client{
+			BaseURL:         server.URL,
+			DownloadBaseURL: server.URL,
+			HTTPClient:      server.Client(),
+		}
+
+		res := runDeepCheck(client, root)
+		if res.Status != statusFAIL {
+			t.Fatalf("expected FAIL, got %s (%s)", res.Status, res.Detail)
+		}
+		if !strings.Contains(res.Detail, "1.24.0") {
+			t.Fatalf("expected tampered version in detail, got %q", res.Detail)
+		}
+		if !strings.Contains(res.Detail, "reinstall") {
+			t.Fatalf("expected remediation hint, got %q", res.Detail)
+		}
+	})
+
+	t.Run("warns when GitHub is unreachable", func(t *testing.T) {
+		root := t.TempDir()
+		installVersion(t, root, "1.24.0", 0o755)
+
+		// Server that always 404s mimics an unavailable release.
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer server.Close()
+		client := &github.Client{
+			BaseURL:         server.URL,
+			DownloadBaseURL: server.URL,
+			HTTPClient:      server.Client(),
+		}
+
+		res := runDeepCheck(client, root)
+		if res.Status != statusWARN {
+			t.Fatalf("expected WARN, got %s (%s)", res.Status, res.Detail)
+		}
+	})
+
+	t.Run("ok when no versions installed", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, "versions"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		client := github.NewClient() // never used because the version list is empty
+		res := runDeepCheck(client, root)
+		if res.Status != statusOK {
+			t.Fatalf("expected OK, got %s (%s)", res.Status, res.Detail)
+		}
+	})
+}
+
+func TestRunDoctor_DeepFlagInvokesChecker(t *testing.T) {
+	// Prove that --deep plumbs through to the injected deepChecker and that
+	// its result appears in the output.
+	isolateEnv(t)
+	root := initTempRoot(t)
+	t.Setenv("ISTIOENV_ROOT", root)
+	installVersion(t, root, "1.24.0", 0o755)
+	t.Setenv("ISTIOENV_VERSION", "1.24.0")
+	t.Setenv("PATH", filepath.Join(root, "shims"))
+	t.Chdir(t.TempDir())
+
+	called := false
+	deepStub := func(_ string) checkResult {
+		called = true
+		return checkResult{Status: statusOK, Name: "Deep checksums", Detail: "stub ran"}
+	}
+
+	var buf bytes.Buffer
+	if err := runDoctor(false, true, stubPing, deepStub, &buf); err != nil {
+		t.Fatalf("unexpected error: %v\n%s", err, buf.String())
+	}
+	if !called {
+		t.Fatalf("expected deep checker to be invoked when --deep is set")
+	}
+	if !strings.Contains(buf.String(), "stub ran") {
+		t.Fatalf("expected deep check output, got:\n%s", buf.String())
+	}
+}
+
+func TestRunDoctor_DeepSkippedWhenNoRoot(t *testing.T) {
+	// --deep without ISTIOENV_ROOT must not panic and must not invoke the
+	// deep checker (nothing to verify without a root).
+	isolateEnv(t)
+	t.Chdir(t.TempDir())
+
+	called := false
+	deepStub := func(_ string) checkResult {
+		called = true
+		return checkResult{Status: statusOK, Name: "Deep checksums"}
+	}
+	var buf bytes.Buffer
+	_ = runDoctor(false, true, stubPing, deepStub, &buf)
+	if called {
+		t.Fatalf("deep check must be skipped when ISTIOENV_ROOT is not set")
+	}
+}
+
+func TestParseRateLimitHeaders(t *testing.T) {
+	t.Run("parses all headers", func(t *testing.T) {
+		h := http.Header{}
+		h.Set("X-RateLimit-Limit", "60")
+		h.Set("X-RateLimit-Remaining", "7")
+		h.Set("X-RateLimit-Reset", "1700000000")
+		st := parseRateLimitHeaders(h)
+		if st.RateLimit != 60 || st.RateRemaining != 7 {
+			t.Fatalf("unexpected rate fields: %+v", st)
+		}
+		if st.RateReset.IsZero() {
+			t.Fatalf("expected non-zero reset time")
+		}
+	})
+
+	t.Run("tolerates missing headers", func(t *testing.T) {
+		st := parseRateLimitHeaders(http.Header{})
+		if st.RateLimit != 0 || st.RateRemaining != 0 || !st.RateReset.IsZero() {
+			t.Fatalf("expected all zero, got %+v", st)
+		}
+	})
+
+	t.Run("tolerates garbage header values", func(t *testing.T) {
+		h := http.Header{}
+		h.Set("X-RateLimit-Limit", "not-a-number")
+		h.Set("X-RateLimit-Remaining", "")
+		h.Set("X-RateLimit-Reset", "also-bad")
+		st := parseRateLimitHeaders(h)
+		if st.RateLimit != 0 || st.RateRemaining != 0 || !st.RateReset.IsZero() {
+			t.Fatalf("expected graceful zeroing, got %+v", st)
+		}
+	})
+}

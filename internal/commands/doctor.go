@@ -3,6 +3,8 @@ package commands
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,11 +13,14 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/user/istioctl-env/internal/config"
+	"github.com/user/istioctl-env/internal/github"
+	"github.com/user/istioctl-env/internal/platform"
 	"github.com/user/istioctl-env/internal/semver"
 	"github.com/user/istioctl-env/internal/shim"
 )
@@ -35,14 +40,48 @@ type checkResult struct {
 	Detail string
 }
 
-// pinger is a stubbable network-reachability probe used by the GitHub check.
-type pinger func() error
+// ghStatus is the richer GitHub probe result used by checkGitHub.  It
+// carries both reachability information and (when the server returned
+// them) rate-limit headers so we can warn the user before they hit the
+// unauthenticated 60-req/hour cap.
+type ghStatus struct {
+	// Err is non-nil when the request could not complete (DNS, timeout,
+	// 5xx).  Any non-5xx response — including 401/403/404 — is treated as
+	// reachable with Err == nil.
+	Err error
+
+	// RateLimit and RateRemaining reflect X-RateLimit-Limit and
+	// X-RateLimit-Remaining.  Zero means the headers were absent or
+	// unparseable (which is normal for anonymous ping endpoints that
+	// don't count against the limit).
+	RateLimit     int
+	RateRemaining int
+
+	// RateReset is the UTC time X-RateLimit-Reset points at (zero when
+	// absent).  Used by the warning message to tell the user when the
+	// quota refreshes.
+	RateReset time.Time
+}
+
+// pinger is a stubbable network-reachability probe used by the GitHub
+// check.  Returning ghStatus (rather than a bare error) lets the probe
+// report rate-limit headroom in addition to raw reachability.
+type pinger func() ghStatus
+
+// lowRateRemaining is the threshold below which checkGitHub degrades
+// from OK → WARN even when GitHub is otherwise reachable.  Ten remaining
+// requests is enough to run 'install' once but no more; prompting the
+// user to switch to an authenticated client avoids surprise failures.
+const lowRateRemaining = 10
 
 // Doctor diagnoses the istioctl-env environment and prints a labeled
 // OK/WARN/FAIL for each check. When fix is true, it attempts to repair
-// the issues it can before re-running the checks.
-func Doctor(fix bool) error {
-	return runDoctor(fix, defaultPinger, os.Stdout)
+// the issues it can before re-running the checks.  When deep is true, it
+// additionally re-downloads each installed version's archive from GitHub
+// and byte-compares the result against the on-disk binary — slow and
+// bandwidth-heavy, but catches silent corruption or tampering.
+func Doctor(fix, deep bool) error {
+	return runDoctor(fix, deep, defaultPinger, defaultDeepCheck, os.Stdout)
 }
 
 // DoctorHelp prints help for the doctor command.
@@ -54,6 +93,8 @@ each check with actionable guidance.
 
 Flags:
   --fix          Attempt to repair issues (regenerate shim, chmod binaries)
+  --deep         Re-verify every installed binary against its GitHub
+                 checksum (downloads each archive again; slow)
   -h, --help     Show this help message
 
 Exit codes:
@@ -61,18 +102,26 @@ Exit codes:
   1  at least one check reported FAIL`)
 }
 
+// deepChecker is a stubbable per-version checksum re-verifier.  Separating
+// it from the main run makes tests fast (they inject a no-network stub)
+// and keeps the expensive GitHub traffic opt-in via --deep.
+type deepChecker func(root string) checkResult
+
 // runDoctor is the testable core.  All I/O (stdout, network) is injected
 // so tests can exercise it deterministically.
-func runDoctor(fix bool, ping pinger, out io.Writer) error {
+func runDoctor(fix, deep bool, ping pinger, deepFn deepChecker, out io.Writer) error {
 	if ping == nil {
 		ping = defaultPinger
 	}
+	if deepFn == nil {
+		deepFn = defaultDeepCheck
+	}
 
-	results := gatherChecks(ping)
+	results := gatherChecks(ping, deep, deepFn)
 
 	if fix {
 		applyFixes(results)
-		results = gatherChecks(ping)
+		results = gatherChecks(ping, deep, deepFn)
 	}
 
 	printResults(out, results)
@@ -88,8 +137,11 @@ func runDoctor(fix bool, ping pinger, out io.Writer) error {
 // gatherChecks runs every doctor check in the documented order and
 // returns the aggregated results.  Checks that cannot run because an
 // earlier prerequisite failed are skipped (not reported as FAIL).
-func gatherChecks(ping pinger) []checkResult {
-	results := make([]checkResult, 0, 11)
+//
+// When deep is true, deepFn is invoked at the end to re-verify every
+// installed binary against its GitHub checksum.
+func gatherChecks(ping pinger, deep bool, deepFn deepChecker) []checkResult {
+	results := make([]checkResult, 0, 13)
 
 	// 1. ISTIOENV_ROOT set.
 	envRes := checkEnvRoot()
@@ -122,6 +174,8 @@ func gatherChecks(ping pinger) []checkResult {
 	// 9. All installed version binaries present + executable.
 	if haveRoot {
 		results = append(results, checkInstalledBinaries(root))
+		// 9b. Version directories that contain no istioctl binary at all.
+		results = append(results, checkDanglingVersions(root))
 	}
 
 	// 10. GitHub reachable.
@@ -130,6 +184,15 @@ func gatherChecks(ping pinger) []checkResult {
 	// 11. Cache file parses as valid JSON (if present).
 	if haveRoot {
 		results = append(results, checkCache(root))
+	}
+
+	// 12. Optional deep checksum re-verification (--deep).  Only runs when
+	// we have a root to walk; otherwise there is nothing to verify.
+	if deep && haveRoot {
+		if deepFn == nil {
+			deepFn = defaultDeepCheck
+		}
+		results = append(results, deepFn(root))
 	}
 
 	return results
@@ -403,17 +466,23 @@ func checkShellIntegration(home string) checkResult {
 	}
 }
 
-// 7. Active version resolves via config.ResolveVersion.
+// 7. Active version resolves via getActiveVersionWithSource.  Reusing the
+// same helper as 'istioctl-env status' guarantees the two commands always
+// agree on which precedence tier won.
 func checkResolvedVersion() (checkResult, string) {
-	v, err := config.ResolveVersion()
-	if err != nil {
+	v, src := getActiveVersionWithSource()
+	if v == "" {
 		return checkResult{
 			Status: statusFAIL,
 			Name:   "Active version",
 			Detail: "no version configured; set one with 'istioctl-env global <v>'",
 		}, ""
 	}
-	return checkResult{Status: statusOK, Name: "Active version", Detail: v}, v
+	return checkResult{
+		Status: statusOK,
+		Name:   "Active version",
+		Detail: fmt.Sprintf("%s (set by %s)", v, src),
+	}, v
 }
 
 // 8. Active version binary exists, is a regular file, and is executable.
@@ -444,7 +513,9 @@ func checkActiveBinary(root, version string) checkResult {
 	return checkResult{Status: statusOK, Name: "Active binary", Detail: binaryPath}
 }
 
-// 9. For every installed version, binary exists and is executable.
+// 9. For every installed version, the istioctl binary exists as a regular
+// file and is executable.  Directories missing the binary entirely are
+// reported separately by checkDanglingVersions.
 func checkInstalledBinaries(root string) checkResult {
 	versionsDir := filepath.Join(root, "versions")
 	entries, err := os.ReadDir(versionsDir)
@@ -469,41 +540,120 @@ func checkInstalledBinaries(root string) checkResult {
 		}
 	}
 	versions = semver.SortDescending(versions)
-	var bad []string
+	var nonExec []string
+	healthy := 0
 	for _, v := range versions {
 		bin := filepath.Join(versionsDir, v, "istioctl")
 		info, err := os.Stat(bin)
-		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
-			bad = append(bad, v)
+		if err != nil || !info.Mode().IsRegular() {
+			// Reported by checkDanglingVersions.
+			continue
 		}
+		if info.Mode().Perm()&0o111 == 0 {
+			nonExec = append(nonExec, v)
+			continue
+		}
+		healthy++
 	}
-	if len(bad) > 0 {
+	if len(nonExec) > 0 {
 		return checkResult{
 			Status: statusWARN,
 			Name:   "Installed binaries",
-			Detail: fmt.Sprintf("missing or non-executable: %s", strings.Join(bad, ", ")),
+			Detail: fmt.Sprintf("non-executable: %s; run 'istioctl-env doctor --fix'", strings.Join(nonExec, ", ")),
 		}
 	}
 	return checkResult{
 		Status: statusOK,
 		Name:   "Installed binaries",
-		Detail: fmt.Sprintf("%d installed", len(versions)),
+		Detail: fmt.Sprintf("%d installed", healthy),
 	}
 }
 
-// 10. GitHub reachable via the injected pinger.
+// checkDanglingVersions reports version directories under $ISTIOENV_ROOT/versions/
+// that have no istioctl binary inside — typically a half-finished install or
+// a manually created directory.  The recommended fix is to either reinstall
+// the version or remove it with 'istioctl-env uninstall <version>'.
+func checkDanglingVersions(root string) checkResult {
+	versionsDir := filepath.Join(root, "versions")
+	entries, err := os.ReadDir(versionsDir)
+	if err != nil {
+		return checkResult{
+			Status: statusWARN,
+			Name:   "Dangling versions",
+			Detail: fmt.Sprintf("cannot list %s: %v", versionsDir, err),
+		}
+	}
+	var dangling []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		bin := filepath.Join(versionsDir, e.Name(), "istioctl")
+		info, statErr := os.Stat(bin)
+		if statErr != nil || !info.Mode().IsRegular() {
+			dangling = append(dangling, e.Name())
+		}
+	}
+	if len(dangling) == 0 {
+		return checkResult{
+			Status: statusOK,
+			Name:   "Dangling versions",
+			Detail: "none",
+		}
+	}
+	dangling = semver.SortDescending(dangling)
+	return checkResult{
+		Status: statusWARN,
+		Name:   "Dangling versions",
+		Detail: fmt.Sprintf("no istioctl binary in: %s; reinstall or run 'istioctl-env uninstall <version>'", strings.Join(dangling, ", ")),
+	}
+}
+
+// 10. GitHub reachable via the injected pinger, with rate-limit headroom
+// surfaced when the server returned X-RateLimit-* headers.
 func checkGitHub(ping pinger) checkResult {
 	if ping == nil {
 		ping = defaultPinger
 	}
-	if err := ping(); err != nil {
+	st := ping()
+	if st.Err != nil {
 		return checkResult{
 			Status: statusWARN,
 			Name:   "GitHub",
-			Detail: fmt.Sprintf("unreachable: %v", err),
+			Detail: fmt.Sprintf("unreachable: %v", st.Err),
 		}
 	}
-	return checkResult{Status: statusOK, Name: "GitHub", Detail: "api.github.com reachable"}
+
+	// No headers → treat as plain reachability.  Many /ping-style endpoints
+	// (and most proxies / local test servers) don't advertise rate limits.
+	if st.RateLimit == 0 && st.RateRemaining == 0 {
+		return checkResult{
+			Status: statusOK,
+			Name:   "GitHub",
+			Detail: "api.github.com reachable",
+		}
+	}
+
+	if st.RateRemaining < lowRateRemaining {
+		detail := fmt.Sprintf(
+			"low rate-limit headroom: %d/%d remaining",
+			st.RateRemaining, st.RateLimit,
+		)
+		if !st.RateReset.IsZero() {
+			detail += fmt.Sprintf("; resets at %s", st.RateReset.Local().Format(time.RFC3339))
+		}
+		detail += "; set GITHUB_TOKEN or wait before retrying"
+		return checkResult{
+			Status: statusWARN,
+			Name:   "GitHub",
+			Detail: detail,
+		}
+	}
+	return checkResult{
+		Status: statusOK,
+		Name:   "GitHub",
+		Detail: fmt.Sprintf("api.github.com reachable (%d/%d requests remaining)", st.RateRemaining, st.RateLimit),
+	}
 }
 
 // 11. Cache file parses as valid JSON if present.
@@ -537,22 +687,199 @@ func checkCache(root string) checkResult {
 
 // defaultPinger performs a GET against api.github.com with a 3-second
 // timeout.  Any non-5xx response is considered reachable (401, 403 or 404
-// still prove the host is up).
-func defaultPinger() error {
+// still prove the host is up).  When present, X-RateLimit-* headers are
+// parsed so the caller can warn about low headroom.
+//
+// If GITHUB_TOKEN is set in the environment it is sent as a Bearer token;
+// GitHub counts authenticated requests against a much larger (5000/hour)
+// bucket, so including the token here means the probe reports the limit
+// the user's real workflow will actually see.
+func defaultPinger() ghStatus {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/rate_limit", nil)
 	if err != nil {
-		return err
+		return ghStatus{Err: err}
+	}
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("User-Agent", "istioctl-env-doctor")
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return ghStatus{Err: err}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 500 {
-		return fmt.Errorf("github returned HTTP %d", resp.StatusCode)
+		return ghStatus{Err: fmt.Errorf("github returned HTTP %d", resp.StatusCode)}
+	}
+	return parseRateLimitHeaders(resp.Header)
+}
+
+// errChecksumMismatch is returned by verifyInstalledBinary when the
+// installed istioctl binary does not match the bytes extracted from the
+// freshly-downloaded archive.  It is used as a sentinel so checkDeep
+// can report mismatches as FAIL and other errors (network, extract) as
+// WARN.
+var errChecksumMismatch = errors.New("installed binary does not match GitHub release")
+
+// defaultDeepCheck is the production implementation of deepChecker.  It
+// constructs a real GitHub client; tests inject a stub instead.
+func defaultDeepCheck(root string) checkResult {
+	return runDeepCheck(github.NewClient(), root)
+}
+
+// runDeepCheck iterates every installed version, re-downloads its archive
+// from GitHub, verifies the archive against its published .sha256, then
+// byte-compares the extracted istioctl against the on-disk binary.  Any
+// mismatch is a FAIL (the local binary is wrong); any other failure is a
+// WARN (network/extract problems are not strong evidence of corruption).
+func runDeepCheck(client *github.Client, root string) checkResult {
+	info, err := platform.Detect()
+	if err != nil {
+		return checkResult{
+			Status: statusWARN,
+			Name:   "Deep checksums",
+			Detail: fmt.Sprintf("platform detect: %v", err),
+		}
+	}
+
+	versionsDir := filepath.Join(root, "versions")
+	entries, err := os.ReadDir(versionsDir)
+	if err != nil {
+		return checkResult{
+			Status: statusWARN,
+			Name:   "Deep checksums",
+			Detail: fmt.Sprintf("cannot list %s: %v", versionsDir, err),
+		}
+	}
+
+	var versions []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		bin := filepath.Join(versionsDir, e.Name(), "istioctl")
+		if st, statErr := os.Stat(bin); statErr == nil && st.Mode().IsRegular() {
+			versions = append(versions, e.Name())
+		}
+	}
+	if len(versions) == 0 {
+		return checkResult{
+			Status: statusOK,
+			Name:   "Deep checksums",
+			Detail: "no installed binaries to verify",
+		}
+	}
+
+	versions = semver.SortDescending(versions)
+	var mismatched, failed []string
+	for _, v := range versions {
+		if err := verifyInstalledBinary(client, info, root, v); err != nil {
+			if errors.Is(err, errChecksumMismatch) {
+				mismatched = append(mismatched, v)
+			} else {
+				failed = append(failed, fmt.Sprintf("%s (%v)", v, err))
+			}
+		}
+	}
+
+	if len(mismatched) > 0 {
+		detail := fmt.Sprintf(
+			"checksum mismatch: %s; reinstall with 'istioctl-env install <version>'",
+			strings.Join(mismatched, ", "),
+		)
+		if len(failed) > 0 {
+			detail += "; also failed to verify: " + strings.Join(failed, ", ")
+		}
+		return checkResult{
+			Status: statusFAIL,
+			Name:   "Deep checksums",
+			Detail: detail,
+		}
+	}
+	if len(failed) > 0 {
+		return checkResult{
+			Status: statusWARN,
+			Name:   "Deep checksums",
+			Detail: fmt.Sprintf("could not verify: %s", strings.Join(failed, ", ")),
+		}
+	}
+	return checkResult{
+		Status: statusOK,
+		Name:   "Deep checksums",
+		Detail: fmt.Sprintf("%d binaries verified against GitHub", len(versions)),
+	}
+}
+
+// verifyInstalledBinary downloads the archive + .sha256 for one version,
+// confirms the archive matches its published checksum, extracts the
+// istioctl entry, and byte-compares the result against the on-disk
+// binary.  Returns errChecksumMismatch when the local binary differs.
+func verifyInstalledBinary(client *github.Client, info platform.Info, root, version string) error {
+	archiveURL := client.DownloadURL(platform.DownloadPath(version, info))
+	checksumURL := client.DownloadURL(platform.ChecksumPath(version, info))
+
+	archiveData, err := client.DownloadBinary(archiveURL)
+	if err != nil {
+		return fmt.Errorf("download archive: %w", err)
+	}
+	checksumData, err := client.DownloadBinary(checksumURL)
+	if err != nil {
+		return fmt.Errorf("download checksum: %w", err)
+	}
+
+	expected := strings.TrimSpace(string(checksumData))
+	if parts := strings.Fields(expected); len(parts) > 0 {
+		expected = parts[0]
+	}
+	actualSum := sha256.Sum256(archiveData)
+	if hex.EncodeToString(actualSum[:]) != expected {
+		// GitHub-side mismatch: the published .sha256 doesn't match the
+		// archive they're serving.  Not a local problem — report it so the
+		// user knows not to trust the mismatch verdict either way.
+		return fmt.Errorf("GitHub archive sha256 mismatch")
+	}
+
+	freshBinary, err := extractFromTarGz(archiveData, "istioctl")
+	if err != nil {
+		return fmt.Errorf("extract: %w", err)
+	}
+
+	binaryPath := filepath.Join(root, "versions", version, "istioctl")
+	installed, err := os.ReadFile(binaryPath)
+	if err != nil {
+		return fmt.Errorf("read installed binary: %w", err)
+	}
+
+	if sha256.Sum256(freshBinary) != sha256.Sum256(installed) {
+		return errChecksumMismatch
 	}
 	return nil
+}
+
+// parseRateLimitHeaders reads X-RateLimit-Limit, X-RateLimit-Remaining and
+// X-RateLimit-Reset from a GitHub API response.  Missing or malformed
+// headers result in zero-valued fields rather than an error — the caller
+// treats zeros as "no rate-limit information available".
+func parseRateLimitHeaders(h http.Header) ghStatus {
+	var st ghStatus
+	if raw := h.Get("X-RateLimit-Limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			st.RateLimit = n
+		}
+	}
+	if raw := h.Get("X-RateLimit-Remaining"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			st.RateRemaining = n
+		}
+	}
+	if raw := h.Get("X-RateLimit-Reset"); raw != "" {
+		if sec, err := strconv.ParseInt(raw, 10, 64); err == nil {
+			st.RateReset = time.Unix(sec, 0).UTC()
+		}
+	}
+	return st
 }

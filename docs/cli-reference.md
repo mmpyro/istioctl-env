@@ -524,19 +524,39 @@ Checks performed (in order):
 1. `ISTIOENV_ROOT` is set.
 2. `ISTIOENV_ROOT` exists and is writable.
 3. `$ISTIOENV_ROOT/versions` directory exists.
-4. `$ISTIOENV_ROOT/shims/istioctl` exists and matches the current generator
-   output (drift detection).
-5. `$ISTIOENV_ROOT/shims` is on `PATH`, ahead of any other `istioctl`.
+4. `$ISTIOENV_ROOT/shims/istioctl` exists and byte-matches the current
+   generator output (drift detection — catches stale shims left behind
+   by an upgrade).
+5. `$ISTIOENV_ROOT/shims` is on `PATH`, ahead of any other `istioctl`
+   on `PATH` (catches the common case where Homebrew's `istioctl` wins).
 6. Shell integration appears active (an `istioctl-env init` line is present
    in `~/.bashrc`, `~/.zshrc` or `~/.config/fish/config.fish`). This is
    best-effort and never reports `FAIL`.
-7. An active `istioctl` version resolves (shell / local / global).
+7. An active `istioctl` version resolves. The detail line names the
+   source (`ISTIOENV_VERSION environment variable`,
+   `.istioctl-version file`, or `global version file`) so you can tell
+   at a glance which precedence tier won.
 8. The active version's binary exists at
    `$ISTIOENV_ROOT/versions/<v>/istioctl`, is a regular file, and is
    executable.
-9. Every installed version has a present, executable binary.
-10. GitHub (`https://api.github.com/`) is reachable within 3 seconds.
-11. `$ISTIOENV_ROOT/cache/releases.json`, if it exists, is valid JSON.
+9. Every installed version has an executable `istioctl` binary.
+10. "Dangling versions": version directories under
+    `$ISTIOENV_ROOT/versions/` with no `istioctl` binary inside at all
+    (typically a half-finished install). Remediation: reinstall the
+    version or run `istioctl-env uninstall <version>`.
+11. GitHub (`https://api.github.com/rate_limit`) is reachable within
+    3 seconds, and `X-RateLimit-Remaining` has sufficient headroom
+    (warns when fewer than 10 requests remain in the current window).
+    If `GITHUB_TOKEN` is set it is used, so the headroom reflects the
+    5,000/hour authenticated bucket instead of the 60/hour anonymous
+    one.
+12. `$ISTIOENV_ROOT/cache/releases.json`, if it exists, is valid JSON.
+13. Only with `--deep`: for every installed version, re-download its
+    archive and `.sha256` from GitHub, verify the archive against its
+    published checksum, extract the `istioctl` entry, and byte-compare
+    it against the on-disk binary. A mismatch is reported as `FAIL`;
+    network or extraction errors are reported as `WARN` since they are
+    not strong evidence of local corruption.
 
 Syntax:
 
@@ -551,6 +571,9 @@ Options/flags:
   - `chmod 0755` any version binary that is not currently executable.
   - Does NOT modify `PATH` or shell rc files — doctor prints the
     instructions instead.
+- `--deep`: additionally run check 13 (per-version checksum
+  re-verification). Downloads each installed version's full archive
+  from GitHub, so expect tens of MB of traffic per installed version.
 - `-h`, `--help`: show command help and exit.
 
 Environment variables:
@@ -558,6 +581,8 @@ Environment variables:
 - `ISTIOENV_ROOT` (optional — doctor runs even when unset, reporting the
   missing root as `FAIL`).
 - `HOME` (optional — used to scan shell rc files for the integration check).
+- `GITHUB_TOKEN` (optional — forwarded to the rate-limit probe so the
+  reported headroom matches your real workflow).
 
 Exit codes:
 
@@ -569,6 +594,8 @@ Example:
 ```sh
 istioctl-env doctor
 istioctl-env doctor --fix
+istioctl-env doctor --deep         # verify installed binaries against GitHub
+istioctl-env doctor --fix --deep   # repair, then verify
 ```
 
 ---
