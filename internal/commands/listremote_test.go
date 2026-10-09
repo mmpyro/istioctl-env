@@ -145,6 +145,84 @@ func TestListRemote_StaleCache_DeltaFetch(t *testing.T) {
 	}
 }
 
+func TestListRemote_OfflineSkipsDeltaFetchSilently(t *testing.T) {
+	// Stale cache that would normally trigger a delta fetch.
+	root := t.TempDir()
+	c := cache.NewWithTTL(root+"/cache", -1) // always stale
+	if err := c.Save([]string{"1.24.0", "1.23.0"}, []string{"1.24.0", "1.23.0"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	t.Setenv("ISTIOENV_ROOT", root)
+	t.Setenv("ISTIOENV_CACHE_TTL", "1ns")
+	t.Setenv("ISTIOENV_OFFLINE", "1")
+
+	// Client points at an unreachable address so any delta fetch would error
+	// loudly. In offline mode the code must not call the network at all.
+	failClient := &github.Client{
+		BaseURL:    "http://127.0.0.1:0",
+		HTTPClient: &http.Client{Timeout: 100 * time.Millisecond},
+		Offline:    true,
+	}
+
+	var stderrBuf bytes.Buffer
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	out := captureStdout(t, func() {
+		if err := listRemoteWithClient(failClient, false); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	_ = w.Close()
+	os.Stderr = oldStderr
+	_, _ = io.Copy(&stderrBuf, r)
+
+	if !strings.Contains(out, "1.24.0") {
+		t.Errorf("expected cached version 1.24.0 in output, got: %s", out)
+	}
+	// Crucially: no warning in offline mode because the "failed to fetch"
+	// branch should never be entered.
+	if strings.Contains(stderrBuf.String(), "warning") {
+		t.Errorf("did not expect warning in offline mode, got: %s", stderrBuf.String())
+	}
+}
+
+func TestListRemote_OfflineNoCacheReturnsBaselineSilently(t *testing.T) {
+	// No disk cache at all.
+	t.Setenv("ISTIOENV_ROOT", t.TempDir())
+	t.Setenv("ISTIOENV_OFFLINE", "1")
+
+	failClient := &github.Client{
+		BaseURL:    "http://127.0.0.1:0",
+		HTTPClient: &http.Client{Timeout: 100 * time.Millisecond},
+		Offline:    true,
+	}
+
+	var stderrBuf bytes.Buffer
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	out := captureStdout(t, func() {
+		if err := listRemoteWithClient(failClient, false); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	_ = w.Close()
+	os.Stderr = oldStderr
+	_, _ = io.Copy(&stderrBuf, r)
+
+	if strings.TrimSpace(out) == "" {
+		t.Fatal("expected baseline versions in output, got empty")
+	}
+	if strings.Contains(stderrBuf.String(), "warning") {
+		t.Errorf("did not expect warning on stderr in offline mode, got: %s", stderrBuf.String())
+	}
+}
+
 func TestListRemote_NoCache_NetworkFails_FallsBackToBaseline(t *testing.T) {
 	// No ISTIOENV_ROOT → no disk cache.
 	t.Setenv("ISTIOENV_ROOT", "")

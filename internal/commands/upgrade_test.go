@@ -125,17 +125,58 @@ func TestAtomicReplace(t *testing.T) {
 	})
 }
 
+func TestUpgradeOfflineNoOp(t *testing.T) {
+	// Ensure the upgrade command exits cleanly without any network access
+	// when ISTIOENV_OFFLINE=1 is set.
+	t.Setenv("ISTIOENV_OFFLINE", "1")
+	Version = "1.0.0"
+	defer func() { Version = "dev" }()
+
+	output := captureStdout(t, func() {
+		if err := Upgrade(); err != nil {
+			t.Fatalf("expected nil error in offline mode, got %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "offline mode") {
+		t.Fatalf("expected offline-mode message, got %q", output)
+	}
+	if !strings.Contains(output, "skipping upgrade") {
+		t.Fatalf("expected 'skipping upgrade' message, got %q", output)
+	}
+	if !strings.Contains(output, "ISTIOENV_OFFLINE=1") {
+		t.Fatalf("expected message to reference ISTIOENV_OFFLINE=1, got %q", output)
+	}
+}
+
 func TestSelfDownloadURLFormat(t *testing.T) {
 	// Verify the URL format matches what release.yml publishes.
 	info := platform.Info{OS: "darwin", Arch: "arm64"}
-	url := platform.SelfDownloadURL("0.2.0", info, "mmpyro/istioctl-env")
 
-	expected := "https://github.com/mmpyro/istioctl-env/releases/download/v0.2.0/istioctl-env-darwin-arm64"
-	if url != expected {
-		t.Fatalf("expected %s, got %s", expected, url)
-	}
+	t.Run("defaults to github.com when base is empty", func(t *testing.T) {
+		url := platform.SelfDownloadURL("", "0.2.0", info, "mmpyro/istioctl-env")
+		expected := "https://github.com/mmpyro/istioctl-env/releases/download/v0.2.0/istioctl-env-darwin-arm64"
+		if url != expected {
+			t.Fatalf("expected %s, got %s", expected, url)
+		}
+		if !strings.Contains(url, "mmpyro/istioctl-env") {
+			t.Fatal("URL should contain the correct owner/repo")
+		}
+	})
 
-	if !strings.Contains(url, "mmpyro/istioctl-env") {
-		t.Fatal("URL should contain the correct owner/repo")
-	}
+	t.Run("defaults to github.com when base is DefaultSelfDownloadBaseURL", func(t *testing.T) {
+		url := platform.SelfDownloadURL(platform.DefaultSelfDownloadBaseURL, "0.2.0", info, "mmpyro/istioctl-env")
+		expected := "https://github.com/mmpyro/istioctl-env/releases/download/v0.2.0/istioctl-env-darwin-arm64"
+		if url != expected {
+			t.Fatalf("expected %s, got %s", expected, url)
+		}
+	})
+
+	t.Run("rewrites to mirror when base is set", func(t *testing.T) {
+		url := platform.SelfDownloadURL("https://mirror.corp.example/gh///", "0.2.0", info, "mmpyro/istioctl-env")
+		expected := "https://mirror.corp.example/gh/mmpyro/istioctl-env/releases/download/v0.2.0/istioctl-env-darwin-arm64"
+		if url != expected {
+			t.Fatalf("expected trailing slashes trimmed and mirror used, got %s", url)
+		}
+	})
 }

@@ -76,6 +76,100 @@ func TestInstall(t *testing.T) {
 		}
 	})
 
+	t.Run("ISTIOENV_DOWNLOAD_MIRROR rewrites istioctl download URL", func(t *testing.T) {
+		t.Setenv("ISTIOENV_DOWNLOAD_MIRROR", "https://mirror.corp.example/istio")
+		t.Setenv("ISTIOENV_MIRROR_URL", "")
+		t.Setenv("ISTIOENV_API_MIRROR", "")
+		t.Setenv("ISTIOENV_OFFLINE", "")
+		t.Setenv("ISTIOENV_GITHUB_TOKEN", "")
+		t.Setenv("GITHUB_TOKEN", "")
+
+		client := github.NewClient()
+		got := client.DownloadURL("istio/istio/releases/download/1.24.0/istioctl-1.24.0-osx-arm64.tar.gz")
+		want := "https://mirror.corp.example/istio/istio/istio/releases/download/1.24.0/istioctl-1.24.0-osx-arm64.tar.gz"
+		if got != want {
+			t.Fatalf("mirror rewrite: expected %q, got %q", want, got)
+		}
+	})
+
+	t.Run("legacy ISTIOENV_MIRROR_URL still rewrites istioctl download URL", func(t *testing.T) {
+		t.Setenv("ISTIOENV_DOWNLOAD_MIRROR", "")
+		t.Setenv("ISTIOENV_MIRROR_URL", "https://legacy.example/istio")
+		t.Setenv("ISTIOENV_API_MIRROR", "")
+		t.Setenv("ISTIOENV_OFFLINE", "")
+		t.Setenv("ISTIOENV_GITHUB_TOKEN", "")
+		t.Setenv("GITHUB_TOKEN", "")
+
+		client := github.NewClient()
+		got := client.DownloadURL("istio/istio/releases/download/1.24.0/istioctl-1.24.0-osx-arm64.tar.gz")
+		want := "https://legacy.example/istio/istio/istio/releases/download/1.24.0/istioctl-1.24.0-osx-arm64.tar.gz"
+		if got != want {
+			t.Fatalf("legacy mirror rewrite: expected %q, got %q", want, got)
+		}
+	})
+
+	t.Run("offline mode with no version returns clear error", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		t.Setenv("ISTIOENV_ROOT", tmpDir)
+		t.Setenv("ISTIOENV_OFFLINE", "1")
+		if err := os.MkdirAll(filepath.Join(tmpDir, "versions"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		err := Install("", true)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "cannot determine latest version") {
+			t.Fatalf("expected clear offline error, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "ISTIOENV_OFFLINE") {
+			t.Fatalf("expected error to mention ISTIOENV_OFFLINE, got %v", err)
+		}
+	})
+
+	t.Run("offline mode with mirror installs successfully", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		t.Setenv("ISTIOENV_ROOT", tmpDir)
+		if err := os.MkdirAll(filepath.Join(tmpDir, "versions"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		version := "1.24.0"
+
+		archiveData := createTestTarGz(t, "istioctl", []byte("mirrored binary"))
+		checksum := sha256.Sum256(archiveData)
+		checksumStr := hex.EncodeToString(checksum[:])
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, ".sha256") {
+				fmt.Fprint(w, checksumStr)
+				return
+			}
+			_, _ = w.Write(archiveData)
+		}))
+		defer server.Close()
+
+		// Simulate running with ISTIOENV_OFFLINE=1 and a mirror URL. The
+		// client is instantiated directly to point its download base at
+		// the httptest server; API-level calls are disabled by Offline.
+		client := &github.Client{
+			BaseURL:          "https://api.github.com",
+			DownloadBaseURL:  server.URL,
+			HTTPClient:       server.Client(),
+			Offline:          true,
+			MirrorConfigured: true,
+		}
+
+		if err := installWithClient(client, version, true); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		binaryPath := filepath.Join(tmpDir, "versions", version, "istioctl")
+		if _, err := os.Stat(binaryPath); err != nil {
+			t.Fatalf("expected binary at %s, stat err: %v", binaryPath, err)
+		}
+	})
+
 	t.Run("install with progress bar and checksum", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		t.Setenv("ISTIOENV_ROOT", tmpDir)
