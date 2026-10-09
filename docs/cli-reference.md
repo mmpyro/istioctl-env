@@ -11,10 +11,28 @@ Conventions:
 ## Global usage
 
 ```text
-istioctl-env <command> [arguments]
+istioctl-env [global flags] <command> [arguments]
 ```
 
 Top-level help is available via `istioctl-env help`, `istioctl-env --help`, or `istioctl-env -h`.
+
+## Global flags
+
+These flags affect authentication, offline behavior, and host resolution. They may appear before or after the subcommand; each is a transient override for the matching environment variable listed in [Environment variables](installation-and-configuration.md#environment-variables). A `--` sentinel ends global-flag parsing (useful for `istioctl-env exec`).
+
+| Flag | Env var | Meaning |
+|------|---------|---------|
+| `--offline` | `ISTIOENV_OFFLINE=1` | Disable all outbound HTTP. `list-remote` / `latest` serve from cache / baseline; `install` without an explicit version fails fast; `upgrade` is a no-op. |
+| `--github-token <token>` | `ISTIOENV_GITHUB_TOKEN` | GitHub token used for both API requests and same-origin release-asset downloads. Stripped on cross-origin redirects. |
+| `--api-mirror <url>` | `ISTIOENV_API_MIRROR` | Replace `https://api.github.com`. Mirror must speak the GitHub REST API. |
+| `--download-mirror <url>` | `ISTIOENV_DOWNLOAD_MIRROR` | Replace `https://github.com` for release-asset URLs. Mirror must also serve `<asset>.sha256`. |
+
+Both `--flag value` and `--flag=value` forms are accepted. If a flag and its matching env var are both set, the flag wins (because it sets the env var for the current process before the command runs).
+
+```sh
+istioctl-env --github-token "$GH_TOKEN" --api-mirror https://ghapi.corp install 1.24.0
+istioctl-env --offline list-remote
+```
 
 ## Environment variables
 

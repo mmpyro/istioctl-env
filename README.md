@@ -141,6 +141,19 @@ Full reference: [docs/cli-reference.md](docs/cli-reference.md)
 | `istioctl-env doctor [--fix] [--deep]` | Diagnose the environment and print OK/WARN/FAIL per check (optionally auto-repair; `--deep` also re-verifies installed binaries against GitHub checksums) |
 | `istioctl-env version` | Print istioctl-env version |
 
+### Global flags
+
+Every command accepts the following top-level flags (equivalent env vars shown in parentheses). They may appear before or after the subcommand.
+
+| Flag | Env var | Purpose |
+|------|---------|---------|
+| `--offline` | `ISTIOENV_OFFLINE=1` | Never contact the network. `list-remote`/`latest` serve from cache/baseline; `install` fails fast with a clear message. |
+| `--github-token <token>` | `ISTIOENV_GITHUB_TOKEN` (fallback: `GITHUB_TOKEN`) | GitHub token used for API requests and same-origin asset downloads (5 000/hr instead of 60/hr/IP). |
+| `--api-mirror <url>` | `ISTIOENV_API_MIRROR` | Override `api.github.com` (point at an internal mirror). |
+| `--download-mirror <url>` | `ISTIOENV_DOWNLOAD_MIRROR` (legacy alias: `ISTIOENV_MIRROR_URL`) | Override `github.com` for release-asset downloads. |
+
+See [docs/installation-and-configuration.md](docs/installation-and-configuration.md#environment-variables) for full details.
+
 ## Version Priority
 
 When `istioctl` is invoked, the version is resolved in this order:

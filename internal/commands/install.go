@@ -28,8 +28,13 @@ func installWithClient(client *github.Client, version string, silent bool) error
 		return err
 	}
 
-	// If no version specified, fetch latest
+	// If no version specified, fetch latest. Latest resolution needs the
+	// GitHub API, so bail out early with a clear message when running
+	// offline rather than letting a network error bubble up.
 	if version == "" {
+		if github.IsOffline() {
+			return fmt.Errorf("cannot determine latest version while ISTIOENV_OFFLINE=1; please specify a version explicitly")
+		}
 		latest, err := client.GetLatestRelease()
 		if err != nil {
 			return fmt.Errorf("failed to fetch latest version: %w", err)
