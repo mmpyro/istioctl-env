@@ -6,6 +6,8 @@ Manage multiple versions of the istioctl CLI and switch between them seamlessly.
 
 ## Documentation
 
+Full documentation site: <https://mmpyro.github.io/istioctl-env/>
+
 - [Docs index](docs/index.md)
 - [Installation and configuration](docs/installation-and-configuration.md)
 - [CLI reference](docs/cli-reference.md)

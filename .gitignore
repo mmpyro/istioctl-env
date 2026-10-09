@@ -35,3 +35,7 @@ go.work.sum
 .env.local
 
 !Dockerfile.test
+
+# MkDocs
+/.venv-docs/
+/site/
