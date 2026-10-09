@@ -6,10 +6,24 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+// Supported shell identifiers for shell integration and completion.
+const (
+	ShellBash = "bash"
+	ShellZsh  = "zsh"
+	ShellFish = "fish"
+)
+
+// SupportedShells lists all shells for which istioctl-env can emit
+// shell-integration and completion scripts.
+var SupportedShells = []string{ShellBash, ShellZsh, ShellFish}
 
 // GenerateShimScript creates the istioctl shim script at $ISTIOENV_ROOT/shims/istioctl.
 // The shim resolves the correct istioctl version and executes it.
+//
+// The shim is intentionally POSIX (`#!/bin/sh`) and shared by all shells.
 func GenerateShimScript(istioenvRoot string) error {
 	shimsDir := filepath.Join(istioenvRoot, "shims")
 	if err := os.MkdirAll(shimsDir, 0o755); err != nil {
@@ -76,12 +90,59 @@ exec "$BINARY" "$@"
 	return nil
 }
 
-// GenerateShellInit returns the shell initialization code that should be
-// eval'd in the user's shell (e.g., eval "$(istioctl-env init)").
-// It creates a shell function that intercepts the 'shell' subcommand to
-// set/unset ISTIOENV_VERSION in the current shell, and prepends the shims
-// directory to PATH.
-func GenerateShellInit(istioenvRoot string) string {
+// DetectShell inspects $SHELL and returns a supported shell identifier
+// ("bash", "zsh", or "fish"). If $SHELL is unset or does not match one of the
+// supported shells, DetectShell returns the empty string so callers can decide
+// how to warn the user and fall back.
+func DetectShell() string {
+	sh := strings.TrimSpace(os.Getenv("SHELL"))
+	if sh == "" {
+		return ""
+	}
+	base := filepath.Base(sh)
+	switch base {
+	case ShellBash, ShellZsh, ShellFish:
+		return base
+	}
+	return ""
+}
+
+// NormalizeShell validates an explicit --shell value and returns the
+// canonical identifier. It returns an error that lists the valid choices if
+// the value is empty or unrecognized.
+func NormalizeShell(shell string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(shell)) {
+	case ShellBash:
+		return ShellBash, nil
+	case ShellZsh:
+		return ShellZsh, nil
+	case ShellFish:
+		return ShellFish, nil
+	default:
+		return "", fmt.Errorf("unknown shell %q: valid choices are %s", shell, strings.Join(SupportedShells, ", "))
+	}
+}
+
+// GenerateShellInit returns the shell initialization code for the requested
+// shell. It is a thin wrapper around the per-shell generators. Unknown or
+// empty shell values fall back to bash so this helper never panics.
+func GenerateShellInit(istioenvRoot, shell string) string {
+	switch strings.ToLower(strings.TrimSpace(shell)) {
+	case ShellZsh:
+		return GenerateShellInitZsh(istioenvRoot)
+	case ShellFish:
+		return GenerateShellInitFish(istioenvRoot)
+	default:
+		return GenerateShellInitBash(istioenvRoot)
+	}
+}
+
+// GenerateShellInitBash returns the bash shell initialization code that
+// should be eval'd (e.g., eval "$(istioctl-env init)"). It creates a shell
+// function that intercepts the 'shell' subcommand to set/unset
+// ISTIOENV_VERSION in the current shell, and prepends the shims directory to
+// PATH.
+func GenerateShellInitBash(istioenvRoot string) string {
 	return fmt.Sprintf(`export PATH="%s/shims:$PATH"
 
 istioctl-env() {
@@ -97,5 +158,48 @@ istioctl-env() {
     command istioctl-env "$@"
   fi
 }
+`, istioenvRoot)
+}
+
+// GenerateShellInitZsh returns the zsh shell initialization code. Semantics
+// match the bash version; the body is wrapped in `function istioctl-env() {}`
+// which is valid in both shells but keeps the two generators independent so
+// zsh-only tweaks can land without disturbing bash users.
+func GenerateShellInitZsh(istioenvRoot string) string {
+	return fmt.Sprintf(`export PATH="%s/shims:$PATH"
+
+function istioctl-env() {
+  if [ "$1" = "shell" ]; then
+    if [ -n "$2" ]; then
+      # Validate via the real binary first
+      command istioctl-env shell "$2" || return $?
+      export ISTIOENV_VERSION="$2"
+    elif [ "$1" = "shell" ] && [ $# -eq 1 ]; then
+      command istioctl-env shell
+    fi
+  else
+    command istioctl-env "$@"
+  fi
+}
+`, istioenvRoot)
+}
+
+// GenerateShellInitFish returns the fish shell initialization code. Fish uses
+// different quoting, variable, and function syntax than bash/zsh, so it is
+// implemented separately. It should be sourced via
+// `istioctl-env init --shell fish | source`.
+func GenerateShellInitFish(istioenvRoot string) string {
+	return fmt.Sprintf(`set -gx PATH "%s/shims" $PATH
+
+function istioctl-env
+    if test "$argv[1]" = "shell"; and test (count $argv) -gt 1
+        command istioctl-env shell $argv[2]; or return $status
+        set -gx ISTIOENV_VERSION $argv[2]
+    else if test "$argv[1]" = "shell"
+        command istioctl-env shell
+    else
+        command istioctl-env $argv
+    end
+end
 `, istioenvRoot)
 }

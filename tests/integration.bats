@@ -180,15 +180,60 @@ teardown() {
 }
 
 @test "istioctl-env autocompletion outputs bash script" {
-	run istioctl-env autocompletion
+	# Force bash to avoid depending on $SHELL in the test container
+	run istioctl-env autocompletion --shell bash
 	assert_success
 	assert_output --partial "_istioctl_env_completions()"
 	assert_output --partial "complete -F _istioctl_env_completions istioctl-env"
+}
+
+@test "istioctl-env autocompletion --shell zsh emits #compdef header" {
+	run istioctl-env autocompletion --shell zsh
+	assert_success
+	assert_output --partial "#compdef istioctl-env"
+	assert_output --partial "_arguments"
+	assert_output --partial "istioctl-env list-remote --cached"
+}
+
+@test "istioctl-env autocompletion --shell fish emits complete lines" {
+	run istioctl-env autocompletion --shell fish
+	assert_success
+	assert_output --partial "complete -c istioctl-env"
+	assert_output --partial "__fish_use_subcommand"
+	assert_output --partial "istioctl-env list-remote --cached"
+}
+
+@test "istioctl-env autocompletion rejects unknown --shell value" {
+	run istioctl-env autocompletion --shell ksh
+	assert_failure
+	assert_output --partial "ksh"
+}
+
+@test "istioctl-env init --shell zsh emits function block" {
+	istioctl-env init --shell zsh
+	run istioctl-env init --shell zsh
+	assert_success
+	assert_output --partial "function istioctl-env()"
+	assert_output --partial "shims:\$PATH"
+}
+
+@test "istioctl-env init --shell fish emits set -gx PATH" {
+	run istioctl-env init --shell fish
+	assert_success
+	assert_output --partial "set -gx PATH"
+	assert_output --partial "function istioctl-env"
+}
+
+@test "istioctl-env list-remote --cached returns versions without network" {
+	istioctl-env init --shell bash
+	run istioctl-env list-remote --cached
+	assert_success
+	assert_output --regexp "[0-9]+\.[0-9]+\.[0-9]+"
 }
 
 @test "istioctl-env autocompletion --help shows help text" {
 	run istioctl-env autocompletion --help
 	assert_success
 	assert_output --partial "autocompletion"
-	assert_output --partial "source <(istioctl-env autocompletion)"
+	assert_output --partial "--shell"
 }

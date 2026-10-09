@@ -152,6 +152,11 @@ If no version is configured at any level, the command fails with an informative 
 
 ## Shell Setup
 
+Both `istioctl-env init` and `istioctl-env autocompletion` auto-detect your
+shell from `$SHELL` and emit code that is idiomatic for it (`eval`-able POSIX
+code for bash/zsh, `source`-able fish code). You can also force a specific
+shell with `--shell <bash|zsh|fish>`.
+
 ### Bash
 
 Add the following to your `~/.bashrc`:
@@ -159,8 +164,8 @@ Add the following to your `~/.bashrc`:
 ```sh
 # istioctl-env setup
 export ISTIOENV_ROOT="$HOME/.istioenv"
-eval "$(istioctl-env init)"
-source <(istioctl-env autocompletion)
+eval "$(istioctl-env init --shell bash)"
+source <(istioctl-env autocompletion --shell bash)
 ```
 
 ### Zsh
@@ -170,8 +175,29 @@ Add the following to your `~/.zshrc`:
 ```sh
 # istioctl-env setup
 export ISTIOENV_ROOT="$HOME/.istioenv"
-eval "$(istioctl-env init)"
-source <(istioctl-env autocompletion)
+eval "$(istioctl-env init --shell zsh)"
+# Make sure compinit has run before sourcing the completion script
+autoload -Uz compinit && compinit
+source <(istioctl-env autocompletion --shell zsh)
+```
+
+The zsh completion uses `_arguments` with per-subcommand descriptions, and
+completes **remote versions** (served from the on-disk release cache) for
+`istioctl-env install <TAB>`, and **installed versions** for `uninstall`,
+`shell`, `local`, `global`, and `exec`.
+
+### Fish
+
+Install the completion into fish's completion directory, and source the init
+code from your fish config:
+
+```fish
+# ~/.config/fish/config.fish
+set -gx ISTIOENV_ROOT "$HOME/.istioenv"
+istioctl-env init --shell fish | source
+
+# One-time: install the completion script
+istioctl-env autocompletion --shell fish > ~/.config/fish/completions/istioctl-env.fish
 ```
 
 ## Caching
