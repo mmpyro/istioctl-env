@@ -9,11 +9,12 @@ func Help() {
 
 Commands:
   help            Display this help message and all available commands
-  list            List all installed versions of istioctl cli
+  list            List all installed versions of istioctl cli. Flags: --disk-usage
   list-remote     List all available versions of istioctl cli from GitHub
   init            Initialize istioctl-env setup
   install         Install a specific version (or latest if not specified). Flags: -s, --silent
   uninstall       Uninstall a specific version
+  prune           Remove unreferenced installed versions. Flags: --keep-last, --older-than, --dry-run, --yes
   shell           Set or show the shell version of istioctl cli
   local           Set or show the local version of istioctl cli
   global          Set or show the global version of istioctl cli
