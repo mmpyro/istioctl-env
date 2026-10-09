@@ -138,6 +138,19 @@ func main() {
 		}
 		err = commands.Exec(version, execArgs)
 
+	case "doctor":
+		fix := false
+		for _, arg := range args[1:] {
+			switch arg {
+			case "-h", "--help":
+				commands.DoctorHelp()
+				os.Exit(0)
+			case "--fix":
+				fix = true
+			}
+		}
+		err = commands.Doctor(fix)
+
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", args[0])
 		commands.Help()

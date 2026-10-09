@@ -138,6 +138,7 @@ Full reference: [docs/cli-reference.md](docs/cli-reference.md)
 | `istioctl-env local [VERSION]` | Set/show local version (`.istioctl-version`) |
 | `istioctl-env global [VERSION]` | Set/show global version (`$ISTIOENV_ROOT/version`) |
 | `istioctl-env which` | Print path to active istioctl binary |
+| `istioctl-env doctor [--fix]` | Diagnose the environment and print OK/WARN/FAIL per check (optionally auto-repair) |
 | `istioctl-env version` | Print istioctl-env version |
 
 ## Version Priority

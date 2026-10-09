@@ -23,6 +23,7 @@ Commands:
   status          Show current istioctl-env environment status
   upgrade         Upgrade istioctl-env to the latest version
   autocompletion  Generate bash autocompletion script
+  doctor          Diagnose the istioctl-env environment and print OK/WARN/FAIL for each check
   version         Print the version of istioctl-env`)
 }
 

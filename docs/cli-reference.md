@@ -514,6 +514,65 @@ istioctl-env status
 
 ---
 
+### `doctor`
+
+Purpose: Diagnose the `istioctl-env` environment and print a labeled
+`OK`/`WARN`/`FAIL` for each check with actionable guidance.
+
+Checks performed (in order):
+
+1. `ISTIOENV_ROOT` is set.
+2. `ISTIOENV_ROOT` exists and is writable.
+3. `$ISTIOENV_ROOT/versions` directory exists.
+4. `$ISTIOENV_ROOT/shims/istioctl` exists and matches the current generator
+   output (drift detection).
+5. `$ISTIOENV_ROOT/shims` is on `PATH`, ahead of any other `istioctl`.
+6. Shell integration appears active (an `istioctl-env init` line is present
+   in `~/.bashrc`, `~/.zshrc` or `~/.config/fish/config.fish`). This is
+   best-effort and never reports `FAIL`.
+7. An active `istioctl` version resolves (shell / local / global).
+8. The active version's binary exists at
+   `$ISTIOENV_ROOT/versions/<v>/istioctl`, is a regular file, and is
+   executable.
+9. Every installed version has a present, executable binary.
+10. GitHub (`https://api.github.com/`) is reachable within 3 seconds.
+11. `$ISTIOENV_ROOT/cache/releases.json`, if it exists, is valid JSON.
+
+Syntax:
+
+```text
+istioctl-env doctor [flags]
+```
+
+Options/flags:
+
+- `--fix`: attempt to repair issues it can resolve safely:
+  - Regenerate the shim script by calling the internal shim generator.
+  - `chmod 0755` any version binary that is not currently executable.
+  - Does NOT modify `PATH` or shell rc files — doctor prints the
+    instructions instead.
+- `-h`, `--help`: show command help and exit.
+
+Environment variables:
+
+- `ISTIOENV_ROOT` (optional — doctor runs even when unset, reporting the
+  missing root as `FAIL`).
+- `HOME` (optional — used to scan shell rc files for the integration check).
+
+Exit codes:
+
+- `0` if no check reports `FAIL`.
+- `1` if at least one check reports `FAIL`.
+
+Example:
+
+```sh
+istioctl-env doctor
+istioctl-env doctor --fix
+```
+
+---
+
 ### `autocompletion`
 
 Purpose: Generate bash autocompletion script for `istioctl-env`.
