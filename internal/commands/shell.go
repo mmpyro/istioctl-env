@@ -7,9 +7,14 @@ import (
 	"github.com/user/istioctl-env/internal/config"
 )
 
-// Shell manages the shell-level istioctl version.
-// With a version argument: verifies it's installed and outputs export command.
-// Without argument: prints the current shell version or errors.
+// Shell manages the shell-level istioctl version expression.
+//
+// With a version argument: validates that it parses as either a plain version
+// or a SemVer constraint and prints the export command for the shell wrapper
+// to eval. The expression need not resolve to an installed version — the
+// shim validates installed-ness at exec time.
+//
+// Without argument: prints the current shell expression.
 func Shell(version string) error {
 	if err := config.RequireInit(); err != nil {
 		return err
@@ -25,13 +30,8 @@ func Shell(version string) error {
 		return nil
 	}
 
-	// Verify version is installed
-	installed, err := config.IsVersionInstalled(version)
-	if err != nil {
+	if err := validateVersionExpression(version); err != nil {
 		return err
-	}
-	if !installed {
-		return fmt.Errorf("version %s not installed", version)
 	}
 
 	// Output export command for the shell function wrapper to eval

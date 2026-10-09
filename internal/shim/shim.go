@@ -37,22 +37,28 @@ set -e
 
 ISTIOENV_ROOT="%s"
 
-# Resolve version: ISTIOENV_VERSION > .istioctl-version (walk up) > $ISTIOENV_ROOT/version
-resolve_version() {
-    # 1. Check ISTIOENV_VERSION env var (shell version)
+# Resolve the configured version EXPRESSION (which may be an exact pin or a
+# SemVer constraint such as ~1.24.0, ^1.24.0, >=1.24.0 <1.26.0, latest,
+# or latest-prerelease).
+#
+# Priority: ISTIOENV_VERSION > .istioctl-version (walk up) > $ISTIOENV_ROOT/version
+resolve_version_expr() {
+    # 1. Check ISTIOENV_VERSION env var (shell version).
     if [ -n "$ISTIOENV_VERSION" ]; then
-        echo "$ISTIOENV_VERSION"
-        return
+        printf '%%s' "$ISTIOENV_VERSION"
+        return 0
     fi
 
-    # 2. Walk up directories looking for .istioctl-version (local version)
-    local dir="$PWD"
+    # 2. Walk up directories looking for .istioctl-version (local version).
+    dir="$PWD"
     while true; do
         if [ -f "$dir/.istioctl-version" ]; then
-            cat "$dir/.istioctl-version"
-            return
+            # Command substitution strips trailing newlines; head -n 1 avoids
+            # multi-line surprises.  Internal whitespace (e.g. ">=1.24.0 <1.26.0")
+            # is preserved.
+            head -n 1 "$dir/.istioctl-version"
+            return 0
         fi
-        local parent
         parent="$(dirname "$dir")"
         if [ "$parent" = "$dir" ]; then
             break
@@ -60,23 +66,51 @@ resolve_version() {
         dir="$parent"
     done
 
-    # 3. Check global version
+    # 3. Check global version.
     if [ -f "$ISTIOENV_ROOT/version" ]; then
-        cat "$ISTIOENV_ROOT/version"
-        return
+        head -n 1 "$ISTIOENV_ROOT/version"
+        return 0
     fi
 
+    return 1
+}
+
+VERSION_EXPR="$(resolve_version_expr || true)"
+if [ -z "$VERSION_EXPR" ]; then
     echo "istioctl-env: no istioctl version configured" >&2
     echo "Set a version using 'istioctl-env shell', 'istioctl-env local', or 'istioctl-env global'" >&2
     exit 1
-}
+fi
 
-VERSION="$(resolve_version)"
-BINARY="$ISTIOENV_ROOT/versions/$VERSION/istioctl"
+# Fast path: the expression is an exact pin and the binary already exists.
+# This keeps the common case free of any extra process spawn.
+BINARY="$ISTIOENV_ROOT/versions/$VERSION_EXPR/istioctl"
+if [ -x "$BINARY" ]; then
+    exec "$BINARY" "$@"
+fi
 
+# Slow path: either VERSION_EXPR is a constraint, or an exact pin that is
+# not installed.  Delegate to the Go binary which understands both and can
+# optionally auto-install when ISTIOENV_AUTO_INSTALL=true.
+#
+# "istioctl-env resolve" prints the concrete version on stdout and sends
+# any progress / warning output to stderr, so we can safely capture it.
+if ! command -v istioctl-env >/dev/null 2>&1; then
+    echo "istioctl-env: cannot resolve $VERSION_EXPR — the istioctl-env binary is not on PATH" >&2
+    exit 1
+fi
+
+RESOLVED="$(istioctl-env resolve --silent)"
+RC=$?
+if [ $RC -ne 0 ] || [ -z "$RESOLVED" ]; then
+    exit $RC
+fi
+
+BINARY="$ISTIOENV_ROOT/versions/$RESOLVED/istioctl"
 if [ ! -x "$BINARY" ]; then
-    echo "istioctl-env: version $VERSION is not installed" >&2
-    echo "Install it with: istioctl-env install $VERSION" >&2
+    echo "istioctl-env: resolved version $RESOLVED is not installed" >&2
+    echo "Install it with: istioctl-env install $RESOLVED" >&2
+    echo "Or set ISTIOENV_AUTO_INSTALL=true to install missing versions automatically" >&2
     exit 1
 fi
 

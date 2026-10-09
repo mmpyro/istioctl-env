@@ -13,9 +13,22 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/user/istioctl-env/internal/cache"
 	"github.com/user/istioctl-env/internal/github"
 )
+
+// seedCache writes a fresh version cache under $ISTIOENV_ROOT so the install
+// / resolve flows see exactly the version pool we want to test against —
+// bypassing both the on-network delta fetch and the hardcoded baseline.
+func seedCache(t *testing.T, root string, stable []string, prerelease []string) {
+	t.Helper()
+	c := cache.NewWithTTL(root+"/cache", time.Hour)
+	if err := c.Save(stable, prerelease); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+}
 
 func TestInstall(t *testing.T) {
 	t.Run("fails when not initialized", func(t *testing.T) {
@@ -124,6 +137,100 @@ func TestInstall(t *testing.T) {
 		binaryPath := filepath.Join(tmpDir, "versions", version, "istioctl")
 		if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
 			t.Fatal("binary was not written")
+		}
+	})
+
+	t.Run("constraint resolves against remote and installs best match", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		t.Setenv("ISTIOENV_ROOT", tmpDir)
+		if err := os.MkdirAll(filepath.Join(tmpDir, "versions"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		seedCache(t, tmpDir,
+			[]string{"1.25.0", "1.24.5", "1.24.3", "1.24.0"},
+			[]string{"1.25.0", "1.24.5", "1.24.3", "1.24.0"},
+		)
+
+		archive := createTestTarGz(t, "istioctl", []byte("binary"))
+		sum := sha256.Sum256(archive)
+		sumStr := hex.EncodeToString(sum[:])
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case strings.HasSuffix(r.URL.Path, ".sha256"):
+				fmt.Fprint(w, sumStr)
+			default:
+				w.Header().Set("Content-Length", fmt.Sprintf("%d", len(archive)))
+				_, _ = w.Write(archive)
+			}
+		}))
+		defer server.Close()
+
+		client := &github.Client{
+			BaseURL:         server.URL,
+			DownloadBaseURL: server.URL,
+			HTTPClient:      server.Client(),
+		}
+
+		output := captureStdout(t, func() {
+			if err := installWithClient(client, "~1.24.0", false); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+
+		if !strings.Contains(output, "~1.24.0 → 1.24.5") {
+			t.Errorf("expected resolution message, got %q", output)
+		}
+		if _, err := os.Stat(filepath.Join(tmpDir, "versions", "1.24.5", "istioctl")); err != nil {
+			t.Fatalf("expected 1.24.5 to be installed: %v", err)
+		}
+	})
+
+	t.Run("empty arg falls back to nearest .istioctl-version", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		t.Setenv("ISTIOENV_ROOT", tmpDir)
+		if err := os.MkdirAll(filepath.Join(tmpDir, "versions"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		seedCache(t, tmpDir,
+			[]string{"1.25.0", "1.24.5", "1.24.3", "1.24.0"},
+			[]string{"1.25.0", "1.24.5", "1.24.3", "1.24.0"},
+		)
+
+		workDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(workDir, ".istioctl-version"), []byte("~1.24.0\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		origDir, _ := os.Getwd()
+		if err := os.Chdir(workDir); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = os.Chdir(origDir) }()
+
+		archive := createTestTarGz(t, "istioctl", []byte("binary"))
+		sum := sha256.Sum256(archive)
+		sumStr := hex.EncodeToString(sum[:])
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case strings.HasSuffix(r.URL.Path, ".sha256"):
+				fmt.Fprint(w, sumStr)
+			default:
+				_, _ = w.Write(archive)
+			}
+		}))
+		defer server.Close()
+
+		client := &github.Client{
+			BaseURL:         server.URL,
+			DownloadBaseURL: server.URL,
+			HTTPClient:      server.Client(),
+		}
+
+		if err := installWithClient(client, "", true); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(tmpDir, "versions", "1.24.5", "istioctl")); err != nil {
+			t.Fatalf("expected 1.24.5 to be installed from .istioctl-version fallback: %v", err)
 		}
 	})
 }

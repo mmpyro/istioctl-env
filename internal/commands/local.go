@@ -7,9 +7,14 @@ import (
 	"github.com/user/istioctl-env/internal/config"
 )
 
-// Local manages the local (directory-level) istioctl version.
-// With a version argument: verifies it's installed and writes .istioctl-version.
-// Without argument: reads and prints the local version or errors.
+// Local manages the local (directory-level) istioctl version expression.
+//
+// With a version argument: validates that it parses as either a plain version
+// or a SemVer constraint and writes .istioctl-version. The expression need
+// not resolve to an installed version — that is checked by the shim at exec
+// time.
+//
+// Without argument: reads and prints the stored local expression.
 func Local(version string) error {
 	if err := config.RequireInit(); err != nil {
 		return err
@@ -29,13 +34,8 @@ func Local(version string) error {
 		return nil
 	}
 
-	// Verify version is installed
-	installed, err := config.IsVersionInstalled(version)
-	if err != nil {
+	if err := validateVersionExpression(version); err != nil {
 		return err
-	}
-	if !installed {
-		return fmt.Errorf("version %s not installed", version)
 	}
 
 	// Write .istioctl-version in current directory

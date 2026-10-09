@@ -199,6 +199,22 @@ func main() {
 		}
 		err = commands.Doctor(fix, deep)
 
+	case "resolve":
+		install := false
+		silent := false
+		for _, arg := range args[1:] {
+			switch arg {
+			case "-h", "--help":
+				commands.ResolveHelp()
+				os.Exit(0)
+			case "--install":
+				install = true
+			case "-s", "--silent":
+				silent = true
+			}
+		}
+		err = commands.Resolve(install, silent)
+
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", args[0])
 		commands.Help()

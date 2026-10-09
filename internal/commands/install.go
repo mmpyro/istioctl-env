@@ -16,8 +16,18 @@ import (
 	"github.com/user/istioctl-env/internal/platform"
 )
 
-// Install downloads and installs a specific istioctl version.
-// If version is empty, it fetches the latest stable release.
+// Install downloads and installs a specific istioctl version or the best
+// match for a SemVer constraint.
+//
+// Behaviour:
+//
+//   - If version is a plain exact pin (e.g. "1.24.0"), that version is
+//     downloaded directly.
+//   - If version is empty, the nearest .istioctl-version is consulted;
+//     when no such file is present, "latest" is used.
+//   - If version is a constraint ("^1.24.0", ">=1.24.0 <1.26.0", "latest",
+//     "latest-prerelease", ...), the remote release list is consulted and
+//     the newest matching version is installed.
 func Install(version string, silent bool) error {
 	client := github.NewClient()
 	return installWithClient(client, version, silent)
@@ -28,17 +38,15 @@ func installWithClient(client *github.Client, version string, silent bool) error
 		return err
 	}
 
-	// If no version specified, fetch latest
-	if version == "" {
-		latest, err := client.GetLatestRelease()
-		if err != nil {
-			return fmt.Errorf("failed to fetch latest version: %w", err)
-		}
-		version = latest
-		if !silent {
-			fmt.Printf("Latest version: %s\n", version)
-		}
+	resolved, raw, err := resolveSpecForInstall(client, version)
+	if err != nil {
+		return err
 	}
+	if !silent && raw != resolved {
+		fmt.Printf("Resolved %s → %s\n", raw, resolved)
+	}
+	// From here on, `version` is the concrete resolved version.
+	version = resolved
 
 	// Check if already installed
 	installed, err := config.IsVersionInstalled(version)

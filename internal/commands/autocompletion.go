@@ -35,7 +35,7 @@ func AutocompletionBash() string {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    opts="help list list-remote init install uninstall shell local global latest which exec status upgrade doctor version"
+    opts="help list list-remote init install uninstall shell local global latest which exec resolve status upgrade doctor version"
 
     if [[ ${COMP_CWORD} -eq 1 ]] ; then
         COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -89,8 +89,10 @@ _istioctl-env() {
                 'global:Set or show the global version'
                 'which:Print the path to the active istioctl binary'
                 'exec:Run a command using a specific istioctl version'
+                'resolve:Resolve the active version expression to a concrete version'
                 'status:Show current istioctl-env environment status'
                 'upgrade:Upgrade istioctl-env to the latest version'
+                'doctor:Diagnose the istioctl-env environment'
                 'autocompletion:Print the shell completion script'
             )
             _describe -t commands 'istioctl-env command' subcommands
@@ -110,6 +112,18 @@ _istioctl-env() {
                     _arguments \
                         '1:version:__istioctl_env_installed_versions' \
                         '*::command: _normal'
+                    ;;
+                resolve)
+                    _arguments \
+                        '--install[Install the best matching remote version if nothing installed matches]' \
+                        '(-s --silent)'{-s,--silent}'[Suppress installer progress output]' \
+                        '(-h --help)'{-h,--help}'[Show help]'
+                    ;;
+                doctor)
+                    _arguments \
+                        '--fix[Attempt to automatically repair issues]' \
+                        '--deep[Also re-verify installed binaries against GitHub checksums]' \
+                        '(-h --help)'{-h,--help}'[Show help]'
                     ;;
                 list-remote|latest)
                     _arguments \
@@ -167,8 +181,10 @@ complete -c istioctl-env -n '__fish_use_subcommand' -a 'global' -d 'Set or show 
 complete -c istioctl-env -n '__fish_use_subcommand' -a 'latest' -d 'Print the latest available version'
 complete -c istioctl-env -n '__fish_use_subcommand' -a 'which' -d 'Print the path to the active istioctl binary'
 complete -c istioctl-env -n '__fish_use_subcommand' -a 'exec' -d 'Run a command using a specific istioctl version'
+complete -c istioctl-env -n '__fish_use_subcommand' -a 'resolve' -d 'Resolve the active version expression to a concrete version'
 complete -c istioctl-env -n '__fish_use_subcommand' -a 'status' -d 'Show current istioctl-env environment status'
 complete -c istioctl-env -n '__fish_use_subcommand' -a 'upgrade' -d 'Upgrade istioctl-env to the latest version'
+complete -c istioctl-env -n '__fish_use_subcommand' -a 'doctor' -d 'Diagnose the istioctl-env environment'
 complete -c istioctl-env -n '__fish_use_subcommand' -a 'version' -d 'Print the version of istioctl-env'
 
 complete -c istioctl-env -n '__fish_seen_subcommand_from install' -a '(istioctl-env list-remote --cached 2>/dev/null)' -d 'Remote version'
@@ -178,6 +194,10 @@ complete -c istioctl-env -n '__fish_seen_subcommand_from install' -s s -l silent
 complete -c istioctl-env -n '__fish_seen_subcommand_from list-remote latest' -l prerelease -d 'Include pre-release versions'
 complete -c istioctl-env -n '__fish_seen_subcommand_from list-remote latest' -l cached -d 'Use on-disk cache only (no network)'
 complete -c istioctl-env -n '__fish_seen_subcommand_from init autocompletion' -l shell -d 'Target shell' -xa 'bash zsh fish'
+complete -c istioctl-env -n '__fish_seen_subcommand_from resolve' -l install -d 'Install the best matching remote version if nothing installed matches'
+complete -c istioctl-env -n '__fish_seen_subcommand_from resolve' -s s -l silent -d 'Suppress installer progress output'
+complete -c istioctl-env -n '__fish_seen_subcommand_from doctor' -l fix -d 'Attempt to automatically repair issues'
+complete -c istioctl-env -n '__fish_seen_subcommand_from doctor' -l deep -d 'Also re-verify installed binaries against GitHub checksums'
 `
 }
 
