@@ -32,7 +32,7 @@ No existing `istioctl` installation is required; `istioctl-env` manages the `ist
 Example (Linux x86_64):
 
 ```sh
-curl -L -o istioctl-env https://github.com/mmpyro/istioctl-env/releases/download/v1.0.0/istioctl-env-linux-amd64
+curl -L -o istioctl-env https://github.com/mmpyro/istioctl-env/releases/download/v1.2.0/istioctl-env-linux-amd64
 chmod +x istioctl-env
 sudo mv istioctl-env /usr/local/bin/istioctl-env
 ```

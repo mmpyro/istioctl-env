@@ -13,16 +13,16 @@ Full documentation site: <https://mmpyro.github.io/istioctl-env/>
 - [CLI reference](docs/cli-reference.md)
 - [Caching strategy](docs/caching.md)
 
-## Downloads (latest tag v1.0.0)
+## Downloads (latest tag v1.2.0)
 
-Latest tag v1.0.0: **v1.0.0** (tag: `v1.0.0`).
+Latest tag v1.2.0: **v1.2.0** (tag: `v1.2.0`).
 
 | Platform | Asset | Download |
 |---|---|---|
-| macOS (Intel) | `istioctl-env-darwin-amd64` | [Download](https://github.com/mmpyro/istioctl-env/releases/download/v1.0.0/istioctl-env-darwin-amd64) |
-| macOS (Apple Silicon) | `istioctl-env-darwin-arm64` | [Download](https://github.com/mmpyro/istioctl-env/releases/download/v1.0.0/istioctl-env-darwin-arm64) |
-| Linux (x86_64) | `istioctl-env-linux-amd64` | [Download](https://github.com/mmpyro/istioctl-env/releases/download/v1.0.0/istioctl-env-linux-amd64) |
-| Linux (ARM64) | `istioctl-env-linux-arm64` | [Download](https://github.com/mmpyro/istioctl-env/releases/download/v1.0.0/istioctl-env-linux-arm64) |
+| macOS (Intel) | `istioctl-env-darwin-amd64` | [Download](https://github.com/mmpyro/istioctl-env/releases/download/v1.2.0/istioctl-env-darwin-amd64) |
+| macOS (Apple Silicon) | `istioctl-env-darwin-arm64` | [Download](https://github.com/mmpyro/istioctl-env/releases/download/v1.2.0/istioctl-env-darwin-arm64) |
+| Linux (x86_64) | `istioctl-env-linux-amd64` | [Download](https://github.com/mmpyro/istioctl-env/releases/download/v1.2.0/istioctl-env-linux-amd64) |
+| Linux (ARM64) | `istioctl-env-linux-arm64` | [Download](https://github.com/mmpyro/istioctl-env/releases/download/v1.2.0/istioctl-env-linux-arm64) |
 
 ## Features
 
