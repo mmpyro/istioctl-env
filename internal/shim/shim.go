@@ -181,7 +181,9 @@ func GenerateShellInitBash(istioenvRoot string) string {
 
 istioctl-env() {
   if [ "$1" = "shell" ]; then
-    if [ -n "$2" ]; then
+    if [ "$2" = "-h" ] || [ "$2" = "--help" ]; then
+      command istioctl-env shell "$2"
+    elif [ -n "$2" ]; then
       # Validate via the real binary first
       command istioctl-env shell "$2" || return $?
       export ISTIOENV_VERSION="$2"
@@ -204,7 +206,9 @@ func GenerateShellInitZsh(istioenvRoot string) string {
 
 function istioctl-env() {
   if [ "$1" = "shell" ]; then
-    if [ -n "$2" ]; then
+    if [ "$2" = "-h" ] || [ "$2" = "--help" ]; then
+      command istioctl-env shell "$2"
+    elif [ -n "$2" ]; then
       # Validate via the real binary first
       command istioctl-env shell "$2" || return $?
       export ISTIOENV_VERSION="$2"
@@ -226,7 +230,9 @@ func GenerateShellInitFish(istioenvRoot string) string {
 	return fmt.Sprintf(`set -gx PATH "%s/shims" $PATH
 
 function istioctl-env
-    if test "$argv[1]" = "shell"; and test (count $argv) -gt 1
+    if test "$argv[1]" = "shell"; and contains -- "$argv[2]" -h --help
+        command istioctl-env shell $argv[2]
+    else if test "$argv[1]" = "shell"; and test (count $argv) -gt 1
         command istioctl-env shell $argv[2]; or return $status
         set -gx ISTIOENV_VERSION $argv[2]
     else if test "$argv[1]" = "shell"

@@ -110,7 +110,8 @@ Shell completion follows the same pattern. The zsh script uses `_arguments`
 with per-subcommand descriptions and completes **remote** versions (served
 from the on-disk release cache) for `istioctl-env install <TAB>`, while
 `uninstall`, `shell`, `local`, `global`, and `exec` complete against
-installed versions. See [CLI reference / autocompletion](cli-reference.md#autocompletion).
+installed versions. Generate it with `istioctl-env completion <bash|zsh|fish|powershell>`;
+see [CLI reference / completion](cli-reference.md#completion).
 
 ### 3) Install an `istioctl` version
 
@@ -213,7 +214,7 @@ Fixes:
 
 ## Environment variables
 
-The following environment variables influence authentication, networking, and artifact resolution. All are optional. Each one has a matching global CLI flag (see the [CLI reference](cli-reference.md#global-flags)); env vars and flags are interchangeable.
+The following environment variables influence authentication, networking, caching, and version management. All are optional. Where a matching global CLI flag exists (see the [CLI reference](cli-reference.md#global-flags)), env vars and flags are interchangeable; if both are given, the flag wins.
 
 | Variable | Flag | Purpose | Default |
 |----------|------|---------|---------|
@@ -223,6 +224,9 @@ The following environment variables influence authentication, networking, and ar
 | `ISTIOENV_API_MIRROR` | `--api-mirror` | Base URL that replaces `https://api.github.com`. The mirror must speak the GitHub REST API. | unset |
 | `ISTIOENV_DOWNLOAD_MIRROR` | `--download-mirror` | Base URL that replaces `https://github.com` when building release-asset URLs. The API host is unaffected. | unset |
 | `ISTIOENV_MIRROR_URL` | — | **Deprecated** alias of `ISTIOENV_DOWNLOAD_MIRROR`. Kept for backward compatibility; use the new name in new deployments. | unset |
+| `ISTIOENV_AUTO_INSTALL` | — | Set to `1` / `true` / `yes` / `on` to let the `istioctl` shim, `resolve` and `exec` install missing versions automatically (`exec --no-auto` overrides it). | unset |
+| `ISTIOENV_CACHE_TTL` | — | How long the on-disk release cache is fresh, as a Go duration (`30m`, `24h`, `0s` to always refetch). See [caching](caching.md). | `1h` |
+| `ISTIOENV_PRUNE_SCAN_ROOTS` | — | Path list (`:`-separated on Unix) of directories `prune` scans for `.istioctl-version` files. Set to `""` to disable scanning. | `$HOME` |
 
 ### GitHub authentication
 

@@ -110,8 +110,9 @@ func constraintIncludesPrerelease(_ semver.Constraint, raw string) bool {
 }
 
 // resolveSpecForShim returns the concrete installed version that satisfies
-// the active expression (shell > local > global), optionally auto-installing
-// the best matching remote version when nothing installed matches.
+// spec, optionally auto-installing the best matching remote version when
+// nothing installed matches.  An empty spec means the active expression
+// (shell > local > global).
 //
 // It is intentionally a different flow from resolveSpecForInstall:
 //
@@ -120,10 +121,13 @@ func constraintIncludesPrerelease(_ semver.Constraint, raw string) bool {
 //   - auto-install is gated on ISTIOENV_AUTO_INSTALL (or the explicit
 //     install=true argument), so non-TTY callers that haven't opted in get
 //     a clear error instead of a silent background download.
-func resolveSpecForShim(client *github.Client, install bool, silent bool) (resolved string, raw string, err error) {
-	raw, err = config.ResolveVersion()
-	if err != nil {
-		return "", "", err
+func resolveSpecForShim(client *github.Client, spec string, install bool, silent bool) (resolved string, raw string, err error) {
+	raw = strings.TrimSpace(spec)
+	if raw == "" {
+		raw, err = config.ResolveVersion()
+		if err != nil {
+			return "", "", err
+		}
 	}
 
 	// Not a constraint → trivial resolution.  Honour auto-install for exact

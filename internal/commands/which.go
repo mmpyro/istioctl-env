@@ -7,6 +7,18 @@ import (
 	"github.com/user/istioctl-env/internal/config"
 )
 
+// WhichHelp prints help for the which command.
+func WhichHelp() {
+	fmt.Println(`Usage: istioctl-env which
+
+Print the absolute path to the active istioctl binary (shell > local >
+global).  When the active version is a constraint, the resolution is printed
+to stderr so stdout stays a clean path.
+
+Flags:
+  -h, --help    Show this help message.`)
+}
+
 // Which prints the absolute path to the active istioctl binary.
 //
 // When the configured version expression is a constraint, the resolution is

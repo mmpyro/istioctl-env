@@ -41,7 +41,7 @@ func setupVersions(t *testing.T, versions ...string) string {
 
 func TestResolve_FailsWhenNotInitialized(t *testing.T) {
 	t.Setenv("ISTIOENV_ROOT", "")
-	if err := Resolve(false, false); err == nil {
+	if err := Resolve("", false, false); err == nil {
 		t.Fatal("expected error when not initialized")
 	}
 }
@@ -51,7 +51,7 @@ func TestResolve_ExactPin_Installed(t *testing.T) {
 	t.Setenv("ISTIOENV_VERSION", "1.24.0")
 
 	out := captureStdout(t, func() {
-		if err := Resolve(false, true); err != nil {
+		if err := Resolve("", false, true); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -64,7 +64,7 @@ func TestResolve_ExactPin_NotInstalled_NoAutoInstall(t *testing.T) {
 	setupVersions(t)
 	t.Setenv("ISTIOENV_VERSION", "1.24.0")
 
-	err := Resolve(false, true)
+	err := Resolve("", false, true)
 	if err == nil {
 		t.Fatal("expected error when exact pin not installed and auto-install disabled")
 	}
@@ -78,7 +78,7 @@ func TestResolve_Caret_PicksHighestInstalled(t *testing.T) {
 	t.Setenv("ISTIOENV_VERSION", "^1.24.0")
 
 	out := captureStdout(t, func() {
-		if err := Resolve(false, true); err != nil {
+		if err := Resolve("", false, true); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -91,7 +91,7 @@ func TestResolve_Constraint_NoInstalledMatch_NoAutoInstall(t *testing.T) {
 	setupVersions(t, "1.23.0")
 	t.Setenv("ISTIOENV_VERSION", "^1.24.0")
 
-	err := Resolve(false, true)
+	err := Resolve("", false, true)
 	if err == nil {
 		t.Fatal("expected error when no installed match and auto-install disabled")
 	}
@@ -127,7 +127,7 @@ func TestResolve_AutoInstallEnvVar(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		if err := resolveWithClient(client, false, true); err != nil {
+		if err := resolveWithClient(client, "", false, true); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -172,7 +172,7 @@ func TestResolve_Constraint_AutoInstallsBestRemote(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		if err := resolveWithClient(client, true, true); err != nil {
+		if err := resolveWithClient(client, "", true, true); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -225,4 +225,54 @@ func createMiniTarGz(t *testing.T, name string, content []byte) []byte {
 		t.Fatal(err)
 	}
 	return buf.Bytes()
+}
+
+func TestResolve_ExplicitSpec(t *testing.T) {
+	t.Run("constraint overrides the active version", func(t *testing.T) {
+		setupVersions(t, "1.24.0", "1.24.3", "1.25.1")
+		t.Setenv("ISTIOENV_VERSION", "1.25.1")
+
+		out := captureStdout(t, func() {
+			if err := Resolve("~1.24.0", false, true); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+		if strings.TrimSpace(out) != "1.24.3" {
+			t.Fatalf("expected 1.24.3, got %q", strings.TrimSpace(out))
+		}
+	})
+
+	t.Run("exact pin installed", func(t *testing.T) {
+		setupVersions(t, "1.24.0")
+		out := captureStdout(t, func() {
+			if err := Resolve("1.24.0", false, true); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+		if strings.TrimSpace(out) != "1.24.0" {
+			t.Fatalf("expected 1.24.0, got %q", strings.TrimSpace(out))
+		}
+	})
+
+	t.Run("works without any active version", func(t *testing.T) {
+		setupVersions(t, "1.24.0")
+		t.Setenv("ISTIOENV_VERSION", "")
+		t.Chdir(t.TempDir())
+		out := captureStdout(t, func() {
+			if err := Resolve("latest", false, true); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+		if strings.TrimSpace(out) != "1.24.0" {
+			t.Fatalf("expected 1.24.0, got %q", strings.TrimSpace(out))
+		}
+	})
+
+	t.Run("unresolved spec fails", func(t *testing.T) {
+		setupVersions(t, "1.23.0")
+		err := Resolve("^1.24.0", false, true)
+		if err == nil || !strings.Contains(err.Error(), "no installed") {
+			t.Fatalf("expected 'no installed' error, got %v", err)
+		}
+	})
 }

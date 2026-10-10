@@ -10,7 +10,7 @@ func Help() {
 Commands:
   help            Display this help message and all available commands
   list            List all installed versions of istioctl cli. Flags: --disk-usage
-  list-remote     List all available versions of istioctl cli from GitHub
+  list-remote     List all available versions of istioctl cli from GitHub. Flags: --prerelease, --cached
   init            Initialize istioctl-env setup
   install         Install a specific version (or latest if not specified). Flags: -s, --silent
   uninstall       Uninstall a specific version
@@ -20,19 +20,21 @@ Commands:
   global          Set or show the global version of istioctl cli
   latest          Print the latest available version of istioctl cli from GitHub releases.
   which           Print the full path to the active istioctl binary
-  exec            Run a command using a specific istioctl version
-  resolve         Resolve the active version expression to a concrete version
+  exec            Run istioctl at a specific version or constraint. Flags: --auto, --no-auto
+  resolve         Resolve a version expression (default: active) to a concrete version. Flags: --install, -s, --silent
   status          Show current istioctl-env environment status
   upgrade         Upgrade istioctl-env to the latest version
-  autocompletion  Generate bash autocompletion script
-  doctor          Diagnose the istioctl-env environment and print OK/WARN/FAIL for each check (flags: --fix, --deep)
+  completion      Print a shell completion script (bash, zsh, fish, powershell)
+  doctor          Diagnose the istioctl-env environment and print OK/WARN/FAIL for each check. Flags: --fix, --deep
   version         Print the version of istioctl-env
 
 Global flags (equivalent env var in parentheses):
   --offline                     Never contact the network   (ISTIOENV_OFFLINE=1)
   --github-token <token>        GitHub token (Bearer auth)  (ISTIOENV_GITHUB_TOKEN)
   --api-mirror <url>            Override api.github.com     (ISTIOENV_API_MIRROR)
-  --download-mirror <url>       Override github.com         (ISTIOENV_DOWNLOAD_MIRROR)`)
+  --download-mirror <url>       Override github.com         (ISTIOENV_DOWNLOAD_MIRROR)
+
+Run 'istioctl-env <command> --help' for details on a command.`)
 }
 
 // InstallHelp prints help for the install command.
@@ -51,5 +53,6 @@ The argument may be:
   - with pre-releases:     latest-prerelease
 
 Flags:
-  -s, --silent    Do not display progress bar or checksum info`)
+  -s, --silent    Do not display progress bar or checksum info
+  -h, --help      Show this help message`)
 }
