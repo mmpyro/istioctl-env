@@ -10,21 +10,21 @@ import (
 
 // ResolveHelp prints the help text for the `resolve` command.
 func ResolveHelp() {
-	fmt.Println(`Usage: istioctl-env resolve [flags]
+	fmt.Println(`Usage: istioctl-env resolve [<spec>] [flags]
 
-Resolve the active istioctl version expression (shell > local > global) to a
-concrete installed version and print it on stdout.  Intended for internal use
-by the istioctl shim and advanced tooling.
+Resolve a version expression to a concrete installed version and print it on
+stdout.  With no <spec>, the active expression (shell > local > global) is
+used.  Used internally by the istioctl shim and handy for scripting.
 
-If the active expression is a SemVer constraint (e.g. ^1.24.0,
->=1.24.0 <1.26.0, latest, latest-prerelease), the newest already-installed
-version that satisfies the constraint is printed.
+If the expression is a SemVer constraint (e.g. ^1.24.0, ">=1.24.0 <1.26.0",
+latest, latest-prerelease), the newest already-installed version that
+satisfies it is printed.
 
 Flags:
   --install      When no installed version satisfies the expression, install
                  the best matching remote version instead of erroring.
                  Equivalent to setting ISTIOENV_AUTO_INSTALL=true.
-  --silent       Suppress installer progress output (recommended for the shim
+  -s, --silent   Suppress installer progress output (recommended for the shim
                  and other non-TTY callers).
   -h, --help     Show this help message.
 
@@ -33,17 +33,17 @@ Environment:
                          enables --install implicitly.`)
 }
 
-// Resolve implements the `resolve` subcommand.  It consults the active
-// version expression, resolves any constraints, optionally auto-installs
+// Resolve implements the `resolve` subcommand.  It consults spec (or the
+// active version expression when spec is empty), resolves any constraints, optionally auto-installs
 // the best match, and prints the concrete version on stdout.
 //
 // Any download / progress output goes to stderr (so the printed resolved
 // version remains a clean one-line value suitable for capture by the shim).
-func Resolve(install bool, silent bool) error {
-	return resolveWithClient(github.NewClient(), install, silent)
+func Resolve(spec string, install bool, silent bool) error {
+	return resolveWithClient(github.NewClient(), spec, install, silent)
 }
 
-func resolveWithClient(client *github.Client, install bool, silent bool) error {
+func resolveWithClient(client *github.Client, spec string, install bool, silent bool) error {
 	if err := config.RequireInit(); err != nil {
 		return err
 	}
@@ -70,7 +70,7 @@ func resolveWithClient(client *github.Client, install bool, silent bool) error {
 		defer restoreStdout()
 	}
 
-	resolved, _, err := resolveSpecForShim(client, install, silent)
+	resolved, _, err := resolveSpecForShim(client, spec, install, silent)
 	restoreStdout()
 	if err != nil {
 		return err

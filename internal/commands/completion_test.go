@@ -5,11 +5,11 @@ import (
 	"testing"
 )
 
-func TestAutocompletion(t *testing.T) {
+func TestCompletion(t *testing.T) {
 	t.Run("prints bash completion script by default", func(t *testing.T) {
 		t.Setenv("SHELL", "/bin/bash")
 		output := captureStdout(t, func() {
-			err := Autocompletion("")
+			err := Completion("")
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -19,14 +19,14 @@ func TestAutocompletion(t *testing.T) {
 			t.Errorf("output should contain completion definition, got: %q", output)
 		}
 
-		if !strings.Contains(output, "opts=\"help list list-remote init install uninstall prune shell local global latest which exec resolve status upgrade doctor version\"") {
+		if !strings.Contains(output, "opts=\"help list list-remote init install uninstall prune shell local global latest which exec resolve status upgrade doctor completion version\"") {
 			t.Errorf("output should contain subcommands list, got: %q", output)
 		}
 	})
 
 	t.Run("--shell zsh prints #compdef header", func(t *testing.T) {
 		output := captureStdout(t, func() {
-			if err := Autocompletion("zsh"); err != nil {
+			if err := Completion("zsh"); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 		})
@@ -50,7 +50,7 @@ func TestAutocompletion(t *testing.T) {
 
 	t.Run("--shell zsh offers remote versions for install from the cache", func(t *testing.T) {
 		output := captureStdout(t, func() {
-			if err := Autocompletion("zsh"); err != nil {
+			if err := Completion("zsh"); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 		})
@@ -66,9 +66,9 @@ func TestAutocompletion(t *testing.T) {
 		}
 	})
 
-	t.Run("--shell zsh completes --shell for init and autocompletion", func(t *testing.T) {
+	t.Run("--shell zsh completes --shell for init and completion", func(t *testing.T) {
 		output := captureStdout(t, func() {
-			if err := Autocompletion("zsh"); err != nil {
+			if err := Completion("zsh"); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 		})
@@ -80,7 +80,7 @@ func TestAutocompletion(t *testing.T) {
 
 	t.Run("--shell fish prints complete -c istioctl-env lines", func(t *testing.T) {
 		output := captureStdout(t, func() {
-			if err := Autocompletion("fish"); err != nil {
+			if err := Completion("fish"); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 		})
@@ -108,7 +108,7 @@ func TestAutocompletion(t *testing.T) {
 	t.Run("auto-detects fish from $SHELL", func(t *testing.T) {
 		t.Setenv("SHELL", "/opt/homebrew/bin/fish")
 		output := captureStdout(t, func() {
-			if err := Autocompletion(""); err != nil {
+			if err := Completion(""); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 		})
@@ -122,7 +122,7 @@ func TestAutocompletion(t *testing.T) {
 		var warn string
 		output := captureStdout(t, func() {
 			warn = captureStderr(t, func() {
-				if err := Autocompletion(""); err != nil {
+				if err := Completion(""); err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
 			})
@@ -136,12 +136,83 @@ func TestAutocompletion(t *testing.T) {
 	})
 
 	t.Run("unknown --shell value is rejected", func(t *testing.T) {
-		err := Autocompletion("ksh")
+		err := Completion("ksh")
 		if err == nil {
 			t.Fatal("expected error for unknown shell")
 		}
 		if !strings.Contains(err.Error(), "ksh") {
 			t.Fatalf("error should mention bad value, got: %v", err)
+		}
+	})
+
+	for _, shell := range []string{"powershell", "pwsh", "PowerShell"} {
+		t.Run(shell+" prints a PowerShell argument completer", func(t *testing.T) {
+			output := captureStdout(t, func() {
+				if err := Completion(shell); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			})
+			if !strings.Contains(output, "Register-ArgumentCompleter -Native -CommandName istioctl-env") {
+				t.Fatalf("expected PowerShell completer, got:\n%s", output)
+			}
+			if !strings.Contains(output, "istioctl-env list-remote --cached") {
+				t.Fatalf("PowerShell completion should offer cached remote versions, got:\n%s", output)
+			}
+			if strings.Contains(output, "{BT}") || !strings.Contains(output, "\"`r?`n\"") {
+				t.Fatalf("backtick placeholder was not substituted, got:\n%s", output)
+			}
+		})
+	}
+
+	t.Run("auto-detects powershell from $SHELL", func(t *testing.T) {
+		t.Setenv("SHELL", "/usr/local/bin/pwsh")
+		output := captureStdout(t, func() {
+			if err := Completion(""); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+		if !strings.Contains(output, "Register-ArgumentCompleter") {
+			t.Fatalf("expected PowerShell completion from auto-detection, got:\n%s", output)
+		}
+	})
+
+	t.Run("unknown shell error lists powershell", func(t *testing.T) {
+		err := Completion("ksh")
+		if err == nil || !strings.Contains(err.Error(), "powershell") {
+			t.Fatalf("expected error listing powershell, got: %v", err)
+		}
+	})
+
+	// Every script must offer `completion` (not the deprecated alias) and the
+	// shell names after it.
+	scripts := map[string]string{
+		"bash":       CompletionBash(),
+		"zsh":        CompletionZsh(),
+		"fish":       CompletionFish(),
+		"powershell": CompletionPowerShell(),
+	}
+	for name, script := range scripts {
+		t.Run(name+" completes the completion command and shell names", func(t *testing.T) {
+			if !strings.Contains(script, "completion") {
+				t.Fatalf("%s script should offer the completion command", name)
+			}
+			if strings.Contains(script, "autocompletion") {
+				t.Fatalf("%s script should not offer the deprecated autocompletion alias", name)
+			}
+			if !strings.Contains(script, "powershell") {
+				t.Fatalf("%s script should complete shell names including powershell", name)
+			}
+			for _, cmd := range []string{"prune", "doctor", "upgrade", "resolve", "exec", "status"} {
+				if !strings.Contains(script, cmd) {
+					t.Fatalf("%s script missing command %q", name, cmd)
+				}
+			}
+		})
+	}
+
+	t.Run("bash install offers cached remote versions", func(t *testing.T) {
+		if !strings.Contains(CompletionBash(), "istioctl-env list-remote --cached") {
+			t.Fatal("bash completion should source install versions from `list-remote --cached`")
 		}
 	})
 }

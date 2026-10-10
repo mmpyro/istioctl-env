@@ -7,6 +7,19 @@ import (
 	"github.com/user/istioctl-env/internal/config"
 )
 
+// ShellHelp prints help for the shell command.
+func ShellHelp() {
+	fmt.Println(`Usage: istioctl-env shell [<version>]
+
+With <version> (exact or constraint), print an export command that sets
+ISTIOENV_VERSION for the current shell; the shell function installed by
+'istioctl-env init' evaluates it.  Without an argument, print the current
+shell-level version.
+
+Flags:
+  -h, --help    Show this help message.`)
+}
+
 // Shell manages the shell-level istioctl version expression.
 //
 // With a version argument: validates that it parses as either a plain version

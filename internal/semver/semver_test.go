@@ -7,12 +7,12 @@ import (
 
 func TestParse(t *testing.T) {
 	tests := []struct {
-		input      string
-		wantMajor  int
-		wantMinor  int
-		wantPatch  int
-		wantPre    string
-		wantOrig   string
+		input     string
+		wantMajor int
+		wantMinor int
+		wantPatch int
+		wantPre   string
+		wantOrig  string
 	}{
 		{"1.2.3", 1, 2, 3, "", "1.2.3"},
 		{"v1.2.3", 1, 2, 3, "", "v1.2.3"},

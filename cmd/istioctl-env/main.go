@@ -2,8 +2,10 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -192,77 +194,92 @@ func main() {
 		err = commands.Install(version, silent)
 
 	case "uninstall":
-		version := ""
-		if len(args) > 1 {
-			version = args[1]
-		}
-		err = commands.Uninstall(version)
+		exitOnHelp(args[1:], commands.UninstallHelp)
+		err = commands.Uninstall(firstArg(args))
 
 	case "shell":
-		version := ""
-		if len(args) > 1 {
-			version = args[1]
-		}
-		err = commands.Shell(version)
+		exitOnHelp(args[1:], commands.ShellHelp)
+		err = commands.Shell(firstArg(args))
 
 	case "local":
-		version := ""
-		if len(args) > 1 {
-			version = args[1]
-		}
-		err = commands.Local(version)
+		exitOnHelp(args[1:], commands.LocalHelp)
+		err = commands.Local(firstArg(args))
 
 	case "global":
-		version := ""
-		if len(args) > 1 {
-			version = args[1]
-		}
-		err = commands.Global(version)
+		exitOnHelp(args[1:], commands.GlobalHelp)
+		err = commands.Global(firstArg(args))
 
 	case "which":
+		exitOnHelp(args[1:], commands.WhichHelp)
 		err = commands.Which()
 
 	case "upgrade":
+		// -h must never fall through to a real upgrade.
+		exitOnHelp(args[1:], commands.UpgradeHelp)
 		err = commands.Upgrade()
 
-	case "autocompletion":
+	case "completion", "autocompletion":
+		if args[0] == "autocompletion" {
+			fmt.Fprintln(os.Stderr, "istioctl-env: 'autocompletion' is deprecated; use 'istioctl-env completion'")
+		}
 		shell := ""
 		for i := 1; i < len(args); i++ {
 			arg := args[i]
 			switch {
 			case arg == "-h" || arg == "--help":
-				commands.AutocompletionHelp()
+				commands.CompletionHelp()
 				os.Exit(0)
 			case arg == "--shell":
 				if i+1 >= len(args) {
-					fmt.Fprintln(os.Stderr, "--shell requires a value (bash|zsh|fish)")
+					fmt.Fprintln(os.Stderr, "--shell requires a value (bash|zsh|fish|powershell)")
 					os.Exit(1)
 				}
 				shell = args[i+1]
 				i++
 			case strings.HasPrefix(arg, "--shell="):
 				shell = strings.TrimPrefix(arg, "--shell=")
+			case shell == "" && !strings.HasPrefix(arg, "-"):
+				shell = arg
 			default:
-				fmt.Fprintf(os.Stderr, "Unknown argument for autocompletion: %s\n", arg)
-				commands.AutocompletionHelp()
+				fmt.Fprintf(os.Stderr, "Unknown argument for completion: %s\n", arg)
+				commands.CompletionHelp()
 				os.Exit(1)
 			}
 		}
-		err = commands.Autocompletion(shell)
+		err = commands.Completion(shell)
 
 	case "status":
+		exitOnHelp(args[1:], commands.StatusHelp)
 		err = commands.Status()
 
 	case "exec":
-		version := ""
-		execArgs := []string{}
-		if len(args) > 1 {
-			version = args[1]
-			if len(args) > 2 {
-				execArgs = args[2:]
+		install := commands.AutoInstallEnabled()
+		spec := ""
+		var execArgs []string
+		// Flags are only recognised before <version>; everything after it
+		// belongs to istioctl.
+	execFlags:
+		for i := 1; i < len(args); i++ {
+			arg := args[i]
+			switch {
+			case arg == "-h" || arg == "--help":
+				commands.ExecHelp()
+				os.Exit(0)
+			case arg == "--auto":
+				install = true
+			case arg == "--no-auto":
+				install = false
+			case strings.HasPrefix(arg, "-"):
+				fmt.Fprintf(os.Stderr, "Unknown flag for exec: %s\n\n", arg)
+				commands.ExecHelp()
+				os.Exit(1)
+			default:
+				spec = arg
+				execArgs = args[i+1:]
+				break execFlags
 			}
 		}
-		err = commands.Exec(version, execArgs)
+		err = commands.Exec(spec, execArgs, install)
 
 	case "doctor":
 		fix := false
@@ -283,18 +300,25 @@ func main() {
 	case "resolve":
 		install := false
 		silent := false
+		spec := ""
 		for _, arg := range args[1:] {
-			switch arg {
-			case "-h", "--help":
+			switch {
+			case arg == "-h" || arg == "--help":
 				commands.ResolveHelp()
 				os.Exit(0)
-			case "--install":
+			case arg == "--install":
 				install = true
-			case "-s", "--silent":
+			case arg == "-s" || arg == "--silent":
 				silent = true
+			case spec == "" && !strings.HasPrefix(arg, "-"):
+				spec = arg
+			default:
+				fmt.Fprintf(os.Stderr, "Unknown argument for resolve: %s\n\n", arg)
+				commands.ResolveHelp()
+				os.Exit(1)
 			}
 		}
-		err = commands.Resolve(install, silent)
+		err = commands.Resolve(spec, install, silent)
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", args[0])
@@ -303,9 +327,38 @@ func main() {
 	}
 
 	if err != nil {
+		// exec passes the child's exit status through untouched; the child
+		// has already written its own diagnostics.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			if code := exitErr.ExitCode(); code > 0 {
+				os.Exit(code)
+			}
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// exitOnHelp prints help and exits 0 when -h/--help appears before any `--`.
+func exitOnHelp(args []string, help func()) {
+	for _, a := range args {
+		if a == "--" {
+			return
+		}
+		if a == "-h" || a == "--help" {
+			help()
+			os.Exit(0)
+		}
+	}
+}
+
+// firstArg returns args[1], or "" when the command has no argument.
+func firstArg(args []string) string {
+	if len(args) > 1 {
+		return args[1]
+	}
+	return ""
 }
 
 // setenvFn is the signature of os.Setenv; abstracted so applyGlobalFlags can
@@ -325,8 +378,9 @@ type setenvFn func(key, value string) error
 //	--download-mirror <url> --download-mirror=<url>   (ISTIOENV_DOWNLOAD_MIRROR)
 //
 // Flags may appear anywhere on the command line (before or after the
-// subcommand). The explicit env var still wins if both are supplied; flags
-// only *set* the env var when the user actually passed them.
+// subcommand). A flag overrides the env var if both are supplied, since it
+// is applied on top of the inherited environment; env vars are only *set*
+// when the user actually passed the flag.
 //
 // A `--` sentinel ends global-flag parsing: everything after it is passed
 // through untouched (useful for `istioctl-env exec`).

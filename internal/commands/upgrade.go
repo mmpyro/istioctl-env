@@ -13,6 +13,24 @@ import (
 
 const istioenvRepo = "mmpyro/istioctl-env"
 
+// UpgradeHelp prints help for the upgrade command.
+func UpgradeHelp() {
+	fmt.Println(`Usage: istioctl-env upgrade
+
+Fetch the latest istioctl-env release from GitHub (mmpyro/istioctl-env) and
+atomically replace the running binary.  Does nothing if already up to date.
+
+Flags:
+  -h, --help    Show this help message.
+
+Environment:
+  ISTIOENV_OFFLINE           Skip the upgrade (no network access).
+  ISTIOENV_GITHUB_TOKEN      GitHub token (falls back to GITHUB_TOKEN).
+  ISTIOENV_API_MIRROR        Override the GitHub API base URL.
+  ISTIOENV_DOWNLOAD_MIRROR   Override the release download base URL
+                             (legacy name: ISTIOENV_MIRROR_URL).`)
+}
+
 // Upgrade downloads the latest stable istioctl-env release from GitHub and replaces
 // the current binary in-place using an atomic rename.
 func Upgrade() error {

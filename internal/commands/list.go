@@ -13,8 +13,8 @@ import (
 // List prints all installed istioctl versions, newest to oldest.
 //
 // When showDiskUsage is false the output is a single column of version
-// strings — one per line — exactly as it has always been.  The autocompletion
-// script relies on this exact format (`istioctl-env list | awk '{print $1}'`),
+// strings — one per line — exactly as it has always been.  The completion
+// scripts rely on this exact format (`istioctl-env list | awk '{print $1}'`),
 // so do not change it.
 //
 // When showDiskUsage is true the output becomes two tab-aligned columns:

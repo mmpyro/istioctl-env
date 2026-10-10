@@ -134,20 +134,25 @@ Full reference: [docs/cli-reference.md](docs/cli-reference.md)
 | `istioctl-env list --disk-usage` | List installed versions with on-disk size and a TOTAL row |
 | `istioctl-env list-remote` | List all available istioctl versions from GitHub |
 | `istioctl-env list-remote --prerelease` | Include pre-release istioctl versions |
+| `istioctl-env list-remote --cached` | List versions from the on-disk release cache only (no network) |
 | `istioctl-env latest` | Print the latest available version of istioctl from GitHub |
 | `istioctl-env init` | Initialize istioctl-env setup |
 | `istioctl-env status` | Show current environment status |
-| `istioctl-env install [VERSION]` | Install a specific version (or latest) |
+| `istioctl-env install [VERSION] [-s\|--silent]` | Install a specific version or constraint (or latest); `--silent` hides progress |
 | `istioctl-env uninstall VERSION` | Uninstall a specific version |
-| `istioctl-env prune` | Dry-run removal of unreferenced versions (use `--yes` to apply) |
-| `istioctl-env exec VERSION CMD` | Run a command using a specific istioctl version |
+| `istioctl-env prune [--keep-last N] [--older-than DUR] [--dry-run] [--yes]` | Remove unreferenced versions; dry run unless `--yes` |
+| `istioctl-env exec [--auto\|--no-auto] VERSION [--] CMD [ARGS...]` | Run istioctl at a version or constraint; passes through istioctl's exit code |
 | `istioctl-env shell [VERSION]` | Set/show shell version (`ISTIOENV_VERSION`) |
 | `istioctl-env local [VERSION]` | Set/show local version (`.istioctl-version`) |
 | `istioctl-env global [VERSION]` | Set/show global version (`$ISTIOENV_ROOT/version`) |
 | `istioctl-env which` | Print path to active istioctl binary |
 | `istioctl-env doctor [--fix] [--deep]` | Diagnose the environment and print OK/WARN/FAIL per check (optionally auto-repair; `--deep` also re-verifies installed binaries against GitHub checksums) |
-| `istioctl-env resolve [--install]` | Resolve the active expression to a concrete version |
+| `istioctl-env resolve [SPEC] [--install] [-s\|--silent]` | Resolve SPEC (default: the active expression) to a concrete version |
+| `istioctl-env upgrade` | Upgrade istioctl-env itself to the latest release |
+| `istioctl-env completion [SHELL]` | Print a completion script for bash, zsh, fish or powershell |
 | `istioctl-env version` | Print istioctl-env version |
+
+Every command accepts `-h`/`--help`.
 
 ### Global flags
 
@@ -199,10 +204,14 @@ repository with a `.istioctl-version` file work out of the box.
 
 ## Shell Setup
 
-Both `istioctl-env init` and `istioctl-env autocompletion` auto-detect your
+Both `istioctl-env init` and `istioctl-env completion` auto-detect your
 shell from `$SHELL` and emit code that is idiomatic for it (`eval`-able POSIX
-code for bash/zsh, `source`-able fish code). You can also force a specific
-shell with `--shell <bash|zsh|fish>`.
+code for bash/zsh, `source`-able fish code). You can also pick a shell
+explicitly: `init --shell <bash|zsh|fish>`, or `completion <bash|zsh|fish|powershell>`
+(`completion --shell <name>` also works).
+
+`istioctl-env autocompletion` still works as a deprecated alias of
+`completion`; it prints a deprecation warning to stderr.
 
 ### Bash
 
@@ -212,7 +221,7 @@ Add the following to your `~/.bashrc`:
 # istioctl-env setup
 export ISTIOENV_ROOT="$HOME/.istioenv"
 eval "$(istioctl-env init --shell bash)"
-source <(istioctl-env autocompletion --shell bash)
+source <(istioctl-env completion bash)
 ```
 
 ### Zsh
@@ -225,13 +234,14 @@ export ISTIOENV_ROOT="$HOME/.istioenv"
 eval "$(istioctl-env init --shell zsh)"
 # Make sure compinit has run before sourcing the completion script
 autoload -Uz compinit && compinit
-source <(istioctl-env autocompletion --shell zsh)
+source <(istioctl-env completion zsh)
 ```
 
 The zsh completion uses `_arguments` with per-subcommand descriptions, and
 completes **remote versions** (served from the on-disk release cache) for
-`istioctl-env install <TAB>`, and **installed versions** for `uninstall`,
-`shell`, `local`, `global`, and `exec`.
+`istioctl-env install <TAB>` and `resolve <TAB>`, and **installed versions**
+for `uninstall`, `shell`, `local`, `global`, and `exec`. The bash, fish and
+PowerShell scripts do the same.
 
 ### Fish
 
@@ -244,7 +254,15 @@ set -gx ISTIOENV_ROOT "$HOME/.istioenv"
 istioctl-env init --shell fish | source
 
 # One-time: install the completion script
-istioctl-env autocompletion --shell fish > ~/.config/fish/completions/istioctl-env.fish
+istioctl-env completion fish > ~/.config/fish/completions/istioctl-env.fish
+```
+
+### PowerShell
+
+Add the following to your `$PROFILE`:
+
+```powershell
+istioctl-env completion powershell | Out-String | Invoke-Expression
 ```
 
 ## Caching

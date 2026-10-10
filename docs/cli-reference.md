@@ -52,10 +52,26 @@ Typically set via `istioctl-env shell` after enabling shell integration with `ev
 
 Optional. When set to a truthy value (`1`, `true`, `yes`, `on`), the `istioctl`
 shim will automatically install missing versions on first use rather than
-failing. This mirrors `nvm`'s auto-install behaviour.
+failing. This mirrors `nvm`'s auto-install behaviour. It also enables
+`--install` for `resolve` and `--auto` for `exec` (`exec --no-auto` overrides it).
 
 Combined with constraints in `.istioctl-version`, this makes a fresh clone of
 a repository "just work" for new contributors.
+
+### `ISTIOENV_CACHE_TTL`
+
+Optional. How long the on-disk release cache (`$ISTIOENV_ROOT/cache/releases.json`)
+is considered fresh, as a Go duration string (`30m`, `24h`, `0s`). Default `1h`.
+See [caching strategy](caching.md).
+
+### `ISTIOENV_MIRROR_URL`
+
+Optional, **deprecated**. Legacy name for `ISTIOENV_DOWNLOAD_MIRROR`; only read
+when `ISTIOENV_DOWNLOAD_MIRROR` is empty.
+
+### `ISTIOENV_PRUNE_SCAN_ROOTS`
+
+Optional. Directories `prune` scans for `.istioctl-version` files. See [`prune`](#prune).
 
 ## Version expressions
 
@@ -215,7 +231,7 @@ istioctl-env list --disk-usage
 
 ### `list-remote`
 
-Purpose: List all available `istioctl` versions from GitHub tag v1.0.0 (newest to oldest).
+Purpose: List all available `istioctl` versions from GitHub releases (newest to oldest).
 
 This command does not require `ISTIOENV_ROOT` or initialization. If `ISTIOENV_ROOT` is set, results are persistently cached on disk (see [caching strategy](caching.md)).
 
@@ -251,7 +267,7 @@ istioctl-env list-remote --prerelease
 
 ### `latest`
 
-Purpose: Print the latest available `istioctl` version from GitHub tag v1.0.0.
+Purpose: Print the latest available `istioctl` version from GitHub releases.
 
 This command does not require `ISTIOENV_ROOT` or initialization. If `ISTIOENV_ROOT` is set, results are persistently cached on disk (see [caching strategy](caching.md)).
 
@@ -295,7 +311,7 @@ Argument semantics:
 - Omitted: the nearest `.istioctl-version` file is consulted (walking up from
   the current directory). If no such file exists, `latest` is used.
 
-The command displays a progress bar during the download and automatically verifies the integrity of the downloaded file using SHA256 checksums from the GitHub tag v1.0.0.
+The command displays a progress bar during the download and automatically verifies the integrity of the downloaded file using SHA256 checksums published with the GitHub release.
 
 Syntax:
 
@@ -340,7 +356,9 @@ Syntax:
 istioctl-env uninstall <version>
 ```
 
-Options/flags: none.
+Options/flags:
+
+- `-h`, `--help`: show command help and exit
 
 Environment variables:
 
@@ -444,7 +462,9 @@ istioctl-env shell            # show
 istioctl-env shell <expression>  # set
 ```
 
-Options/flags: none.
+Options/flags:
+
+- `-h`, `--help`: show command help and exit
 
 Environment variables:
 
@@ -484,7 +504,9 @@ istioctl-env local               # show
 istioctl-env local <expression>  # set
 ```
 
-Options/flags: none.
+Options/flags:
+
+- `-h`, `--help`: show command help and exit
 
 Environment variables:
 
@@ -522,7 +544,9 @@ istioctl-env global               # show
 istioctl-env global <expression>  # set
 ```
 
-Options/flags: none.
+Options/flags:
+
+- `-h`, `--help`: show command help and exit
 
 Environment variables:
 
@@ -558,7 +582,9 @@ Syntax:
 istioctl-env which
 ```
 
-Options/flags: none.
+Options/flags:
+
+- `-h`, `--help`: show command help and exit
 
 Environment variables:
 
@@ -580,17 +606,19 @@ istioctl-env which
 
 ### `resolve`
 
-Purpose: Resolve the active version expression (shell > local > global) to a
-concrete installed version and print it on stdout. Primarily used by the
-`istioctl` shim; also useful for scripts that need the resolved version.
+Purpose: Resolve a [version expression](#version-expressions) to a concrete
+installed version and print it on stdout. With no `<spec>`, the active
+expression (shell > local > global) is used. Primarily used by the `istioctl`
+shim; also useful for scripts that need the resolved version.
 
-With `--install`, missing versions are installed on-the-fly (equivalent to
-setting `ISTIOENV_AUTO_INSTALL=true`).
+Installed versions are matched first. With `--install`, a missing version is
+installed on-the-fly (equivalent to setting `ISTIOENV_AUTO_INSTALL=true`);
+install progress goes to stderr so stdout is only the bare version.
 
 Syntax:
 
 ```text
-istioctl-env resolve [flags]
+istioctl-env resolve [<spec>] [flags]
 ```
 
 Options/flags:
@@ -614,13 +642,16 @@ Example:
 ```sh
 # Called by the shim's slow path.
 istioctl-env resolve --silent
+
+# Resolve an explicit constraint against installed versions.
+istioctl-env resolve "~1.24.0"
 ```
 
 ---
 
 ### `upgrade`
 
-Purpose: Download the tag v1.0.0 of `istioctl-env` from GitHub and replace the current binary in-place.
+Purpose: Fetch the latest `istioctl-env` release from GitHub (`mmpyro/istioctl-env`) and replace the current binary in-place.
 
 Syntax:
 
@@ -628,9 +659,18 @@ Syntax:
 istioctl-env upgrade
 ```
 
-Options/flags: none.
+Options/flags:
 
-Environment variables: none (the binary path is auto-detected via `os.Executable()`).
+- `-h`, `--help`: show command help and exit (never upgrades)
+
+Environment variables (the binary path itself is auto-detected via `os.Executable()`):
+
+- `ISTIOENV_OFFLINE`: skip the upgrade with a message and exit `0`.
+- `ISTIOENV_GITHUB_TOKEN` / `GITHUB_TOKEN`: GitHub token for the API request.
+- `ISTIOENV_API_MIRROR`: alternative GitHub API base for looking up the latest release.
+- `ISTIOENV_DOWNLOAD_MIRROR` (legacy `ISTIOENV_MIRROR_URL`): alternative download base for the release asset.
+
+The matching global flags (`--offline`, `--github-token`, `--api-mirror`, `--download-mirror`) work too.
 
 Exit codes:
 
@@ -655,28 +695,40 @@ istioctl-env upgrade
 
 Purpose: Run a specific version of `istioctl` for a single command without changing the active version (shell, local, or global).
 
+`<version>` may be an exact pin or any [version expression](#version-expressions);
+it is resolved like [`resolve`](#resolve) (installed versions first). `<command>`
+and `[args...]` are passed to that `istioctl` binary. One leading `--` after
+`<version>` is stripped, so `exec 1.24.0 -- --help` passes `--help` to istioctl.
+
 Syntax:
 
 ```text
-istioctl-env exec <version> <command> [args...]
+istioctl-env exec [--auto|--no-auto] <version> [--] <command> [args...]
 ```
 
-Options/flags: none.
+Options/flags (must come before `<version>`):
+
+- `--auto`: install the best matching remote version if nothing installed matches
+- `--no-auto`: never install, even when `ISTIOENV_AUTO_INSTALL` is set
+- `-h`, `--help`: show command help and exit
 
 Environment variables:
 
 - `ISTIOENV_ROOT` (required)
-- `ISTIOENV_VERSION` (set for the subprocess to match the requested version)
+- `ISTIOENV_AUTO_INSTALL` (optional; when truthy, acts as `--auto`)
+- `ISTIOENV_VERSION` (set for the subprocess to the concrete resolved version)
 
 Exit codes:
 
-- Exit code of the executed command.
-- `1` if the version is not installed or initialization fails.
+- The exit code of `istioctl`, passed through unchanged.
+- `1` if initialization fails, the version cannot be resolved, or the install fails.
 
 Example:
 
 ```sh
 istioctl-env exec 1.24.0 version
+istioctl-env exec "~1.24.0" -- analyze -n default
+istioctl-env exec --auto 1.25.0 version
 ```
 
 ---
@@ -697,7 +749,9 @@ Syntax:
 istioctl-env status
 ```
 
-Options/flags: none.
+Options/flags:
+
+- `-h`, `--help`: show command help and exit
 
 Environment variables:
 
@@ -803,28 +857,31 @@ istioctl-env doctor --fix --deep   # repair, then verify
 
 ---
 
-### `autocompletion`
+### `completion`
 
 Purpose: Generate an idiomatic shell completion script for `istioctl-env`.
 
-The script completes subcommands and version arguments. For `install`, it
-offers **remote** versions read from the on-disk release cache (via
-`istioctl-env list-remote --cached`, which never hits the network). For
+The script completes subcommands and version arguments. For `install` and
+`resolve`, it offers **remote** versions read from the on-disk release cache
+(via `istioctl-env list-remote --cached`, which never hits the network). For
 `uninstall`, `shell`, `local`, `global`, and `exec`, it offers **installed**
-versions via `istioctl-env list`. Flags such as `--prerelease`, `--cached`,
-`--silent`, and `--shell` are also completed where appropriate.
+versions via `istioctl-env list`. After `completion`, it offers the shell
+names. Flags such as `--prerelease`, `--cached`, `--silent`, and `--shell` are
+also completed where appropriate.
 
 Syntax:
 
 ```text
-istioctl-env autocompletion [--shell <bash|zsh|fish>]
+istioctl-env completion [<shell>] [--shell <shell>]
 ```
+
+`<shell>` is one of `bash`, `zsh`, `fish`, `powershell` (alias `pwsh`).
 
 Options/flags:
 
-- `--shell <name>`: emit the completion script for the named shell. When
-  omitted, `istioctl-env` auto-detects the shell from `$SHELL`. If detection
-  fails, it falls back to `bash` and prints a `WARN` to stderr.
+- `--shell <name>`: same as the positional `<shell>`. When neither is given,
+  `istioctl-env` auto-detects the shell from `$SHELL`. If detection fails, it
+  falls back to `bash` and prints a `WARN` to stderr.
 - `-h`, `--help`: show command help and exit
 
 Environment variables:
@@ -832,19 +889,29 @@ Environment variables:
 - `SHELL` (read for auto-detection)
 
 Exit codes:
+
 - `0` on success.
-- `1` if `--shell` has an unknown value.
+- `1` if the shell name is unknown.
 
 Example:
 
 ```sh
 # Bash — enable for the current session or persist in ~/.bashrc
-source <(istioctl-env autocompletion --shell bash)
+source <(istioctl-env completion bash)
 
 # Zsh — compinit must have run first (usually via your framework)
 autoload -Uz compinit && compinit
-source <(istioctl-env autocompletion --shell zsh)
+source <(istioctl-env completion zsh)
 
 # Fish — one-time install
-istioctl-env autocompletion --shell fish > ~/.config/fish/completions/istioctl-env.fish
+istioctl-env completion fish > ~/.config/fish/completions/istioctl-env.fish
 ```
+
+```powershell
+# PowerShell — add to $PROFILE
+istioctl-env completion powershell | Out-String | Invoke-Expression
+```
+
+Deprecated alias: `istioctl-env autocompletion` accepts the same arguments and
+prints `istioctl-env: 'autocompletion' is deprecated; use 'istioctl-env completion'`
+to stderr. It is hidden from help and completion lists.

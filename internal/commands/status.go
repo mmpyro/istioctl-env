@@ -10,6 +10,17 @@ import (
 	"github.com/user/istioctl-env/internal/semver"
 )
 
+// StatusHelp prints help for the status command.
+func StatusHelp() {
+	fmt.Println(`Usage: istioctl-env status
+
+Show ISTIOENV_ROOT, the active version and where it was set, and the
+installed versions.
+
+Flags:
+  -h, --help    Show this help message.`)
+}
+
 // Status provides an overview of the current istioctl-env environment.
 //
 // When the active expression is a SemVer constraint, both the raw expression

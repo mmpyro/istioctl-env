@@ -3,6 +3,7 @@ package main
 import (
 	"reflect"
 	"testing"
+	"time"
 )
 
 // recordedSet captures env writes performed by applyGlobalFlags without
@@ -105,5 +106,58 @@ func TestApplyGlobalFlags(t *testing.T) {
 				t.Errorf("env mismatch: got %#v want %#v", rec.entries, tt.wantEnv)
 			}
 		})
+	}
+}
+
+func TestParseDurationShorthand(t *testing.T) {
+	const day = 24 * time.Hour
+	tests := []struct {
+		in      string
+		want    time.Duration
+		wantErr bool
+	}{
+		{in: "30d", want: 30 * day},
+		{in: "2w", want: 14 * day},
+		{in: "1w3d", want: 10 * day},
+		{in: "2W", want: 14 * day},
+		{in: " 7d ", want: 7 * day},
+		{in: "12h30m", want: 12*time.Hour + 30*time.Minute},
+		{in: "0s", want: 0},
+		{in: "", wantErr: true},
+		{in: "   ", wantErr: true},
+		{in: "bogus", wantErr: true},
+		{in: "30x", wantErr: true},
+		{in: "30", wantErr: true},
+		{in: "d", wantErr: true},
+		{in: "30d12h", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			got, ok, err := parseDurationShorthand(tt.in)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr = %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				if ok {
+					t.Fatal("ok should be false on error")
+				}
+				return
+			}
+			if !ok {
+				t.Fatal("ok should be true for parsed input")
+			}
+			if got != tt.want {
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFirstArg(t *testing.T) {
+	if got := firstArg([]string{"global"}); got != "" {
+		t.Fatalf("got %q, want empty", got)
+	}
+	if got := firstArg([]string{"global", "1.24.0", "extra"}); got != "1.24.0" {
+		t.Fatalf("got %q, want 1.24.0", got)
 	}
 }

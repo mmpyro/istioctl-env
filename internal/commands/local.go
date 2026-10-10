@@ -7,6 +7,18 @@ import (
 	"github.com/user/istioctl-env/internal/config"
 )
 
+// LocalHelp prints help for the local command.
+func LocalHelp() {
+	fmt.Println(`Usage: istioctl-env local [<version>]
+
+With <version> (exact or constraint), write .istioctl-version in the current
+directory.  Without an argument, print the nearest local version (searching
+parent directories).
+
+Flags:
+  -h, --help    Show this help message.`)
+}
+
 // Local manages the local (directory-level) istioctl version expression.
 //
 // With a version argument: validates that it parses as either a plain version

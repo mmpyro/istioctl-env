@@ -9,6 +9,17 @@ import (
 	"github.com/user/istioctl-env/internal/semver"
 )
 
+// GlobalHelp prints help for the global command.
+func GlobalHelp() {
+	fmt.Println(`Usage: istioctl-env global [<version>]
+
+With <version> (exact or constraint), write $ISTIOENV_ROOT/version.  Without
+an argument, print the global version.
+
+Flags:
+  -h, --help    Show this help message.`)
+}
+
 // Global manages the global istioctl version expression.
 //
 // With a version argument: validates that it parses as either a plain

@@ -173,13 +173,13 @@ func TestGenerateShellInitDispatch(t *testing.T) {
 
 func TestDetectShell(t *testing.T) {
 	cases := map[string]string{
-		"":                "",
-		"/bin/bash":       "bash",
-		"/usr/bin/zsh":    "zsh",
+		"":                       "",
+		"/bin/bash":              "bash",
+		"/usr/bin/zsh":           "zsh",
 		"/opt/homebrew/bin/fish": "fish",
-		"/bin/dash":       "",
-		"zsh":             "zsh",
-		"/usr/local/bin/pwsh": "",
+		"/bin/dash":              "",
+		"zsh":                    "zsh",
+		"/usr/local/bin/pwsh":    "",
 	}
 	for in, want := range cases {
 		in, want := in, want
@@ -195,9 +195,9 @@ func TestDetectShell(t *testing.T) {
 
 func TestNormalizeShell(t *testing.T) {
 	good := map[string]string{
-		"bash": "bash",
-		"ZSH":  "zsh",
-		"Fish": "fish",
+		"bash":     "bash",
+		"ZSH":      "zsh",
+		"Fish":     "fish",
 		"  bash  ": "bash",
 	}
 	for in, want := range good {
@@ -227,5 +227,15 @@ func TestNormalizeShell(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// `istioctl-env shell -h` must print help, not export ISTIOENV_VERSION=-h.
+func TestGenerateShellInit_ShellHelpIsNotExported(t *testing.T) {
+	for _, sh := range SupportedShells {
+		out := GenerateShellInit("/root", sh)
+		if !strings.Contains(out, "--help") {
+			t.Fatalf("%s shell init should special-case shell -h/--help, got:\n%s", sh, out)
+		}
 	}
 }
