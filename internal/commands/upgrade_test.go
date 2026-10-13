@@ -179,4 +179,15 @@ func TestSelfDownloadURLFormat(t *testing.T) {
 			t.Fatalf("expected trailing slashes trimmed and mirror used, got %s", url)
 		}
 	})
+
+	t.Run("maps istio osx name to the darwin release asset", func(t *testing.T) {
+		// platform.Detect reports osx so Istio archives resolve, but
+		// istioctl-env release assets are published as darwin.
+		detected := platform.Info{OS: "osx", Arch: "arm64"}
+		url := platform.SelfDownloadURL("", "1.2.0", detected, "mmpyro/istioctl-env")
+		expected := "https://github.com/mmpyro/istioctl-env/releases/download/v1.2.0/istioctl-env-darwin-arm64"
+		if url != expected {
+			t.Fatalf("expected %s, got %s", expected, url)
+		}
+	})
 }
