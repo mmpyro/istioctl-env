@@ -17,8 +17,12 @@ const DefaultSelfDownloadBaseURL = "https://github.com"
 // download — for example an internal corporate mirror configured via
 // ISTIOENV_DOWNLOAD_MIRROR.
 //
-// Asset naming convention: istioctl-env-{os}-{arch}
+// Asset naming convention: istioctl-env-{os}-{arch}, where os is the Go
+// GOOS name (darwin, linux), not Istio's archive name (osx, linux).
 // Example: https://github.com/mmpyro/istioctl-env/releases/download/v0.2.0/istioctl-env-darwin-arm64
+//
+// info may come from Detect, which reports osx on macOS so Istio archives
+// resolve. That name is rewritten to darwin here.
 func SelfDownloadURL(baseURL, version string, info Info, ownerRepo string) string {
 	base := strings.TrimRight(baseURL, "/")
 	if base == "" {
@@ -26,6 +30,15 @@ func SelfDownloadURL(baseURL, version string, info Info, ownerRepo string) strin
 	}
 	return fmt.Sprintf(
 		"%s/%s/releases/download/v%s/istioctl-env-%s-%s",
-		base, ownerRepo, version, info.OS, info.Arch,
+		base, ownerRepo, version, selfAssetOS(info.OS), info.Arch,
 	)
+}
+
+// selfAssetOS maps a platform OS name to the istioctl-env release asset OS.
+// Release binaries follow Go's GOOS (darwin). Detect reports Istio's name (osx).
+func selfAssetOS(osName string) string {
+	if osName == "osx" {
+		return "darwin"
+	}
+	return osName
 }
